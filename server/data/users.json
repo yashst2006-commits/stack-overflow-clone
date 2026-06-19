@@ -1,0 +1,29 @@
+[
+  {
+    "_id": "42a94a64-9144-44cc-bb03-eb38d217d03d",
+    "name": "yashwanth",
+    "email": "yashwanthst2006@gmail.com",
+    "password": "$2b$12$lczJ4Z5NPEwwU/sZo76RDew00kDFEqFfKtblhoTW0xc8Zyv7hJfry",
+    "about": "Test",
+    "tags": [],
+    "joinDate": "2026-06-14T07:24:02.823Z"
+  },
+  {
+    "_id": "39206848-850b-4388-8388-114ab4b143e3",
+    "name": "yashwanth1234",
+    "email": "yashst2006@gmail.com",
+    "password": "$2b$12$kk03qz8RMdlDEWb8WXej0.1vbxPACSFF6DCRn3KIUearHrXtNAk3m",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-06-16T13:43:16.553Z"
+  },
+  {
+    "_id": "2daff30b-467f-4680-b6b9-cf6c866dc551",
+    "name": "yash",
+    "email": "sec24am094@sairamtap.edu.in",
+    "password": "$2b$12$6Wr9nDMdq8y/JAR3u7omiu/6YOEmnAbVibcOhrUVZINB3sohM7md6",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-06-16T14:45:02.488Z"
+  }
+]
