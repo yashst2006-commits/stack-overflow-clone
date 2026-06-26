@@ -1,0 +1,33 @@
+[
+  {
+    "userId": "42a94a64-9144-44cc-bb03-eb38d217d03d",
+    "friends": [
+      "39206848-850b-4388-8388-114ab4b143e3",
+      "1d3f889b-3071-4415-92a3-39a8c126454a"
+    ],
+    "pendingSent": [],
+    "pendingReceived": []
+  },
+  {
+    "userId": "2daff30b-467f-4680-b6b9-cf6c866dc551",
+    "friends": [],
+    "pendingSent": [],
+    "pendingReceived": []
+  },
+  {
+    "userId": "39206848-850b-4388-8388-114ab4b143e3",
+    "friends": [
+      "42a94a64-9144-44cc-bb03-eb38d217d03d"
+    ],
+    "pendingSent": [],
+    "pendingReceived": []
+  },
+  {
+    "userId": "1d3f889b-3071-4415-92a3-39a8c126454a",
+    "friends": [
+      "42a94a64-9144-44cc-bb03-eb38d217d03d"
+    ],
+    "pendingSent": [],
+    "pendingReceived": []
+  }
+]

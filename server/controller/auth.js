@@ -5,8 +5,10 @@ import user from "../models/auth.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
+import { fileURLToPath } from "url";
 
-const usersFile = path.join(process.cwd(), "data", "users.json");
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+const usersFile = path.join(currentDirectory, "..", "data", "users.json");
 
 const isMongoConnected = () => mongoose.connection.readyState === 1;
 

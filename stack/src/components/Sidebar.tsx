@@ -5,11 +5,13 @@ import {
   Building,
   FileText,
   Home,
+  Handshake,
   MessageSquare,
   MessageSquareIcon,
   Tag,
   Trophy,
   Users,
+  Globe,
 } from "lucide-react";
 import Link from "next/link";
 import React from "react";
@@ -72,6 +74,24 @@ const Sidebar = ({ isopen }: any) => {
               >
                 <Users className="w-4 h-4 mr-2 lg:mr-3" />
                 Users
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/friends"
+                className="flex items-center px-2 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm"
+              >
+                <Handshake className="w-4 h-4 mr-2 lg:mr-3" />
+                Friends
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/social-feed"
+                className="flex items-center px-2 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm font-semibold text-orange-600 bg-orange-50/50 hover:bg-orange-50"
+              >
+                <Globe className="w-4 h-4 mr-2 lg:mr-3 text-orange-500" />
+                Social Feed
               </Link>
             </li>
             <li>
