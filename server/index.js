@@ -7,6 +7,7 @@ import questionroute from "./routes/question.js";
 import answerroutes from "./routes/answer.js";
 import friendroutes from "./routes/friend.js";
 import postroutes from "./routes/post.js";
+import forgotPasswordroute from "./routes/forgotPassword.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -31,6 +32,7 @@ app.use("/question", questionroute);
 app.use("/answer", answerroutes);
 app.use("/friends", friendroutes);
 app.use("/posts", postroutes);
+app.use("/forgot-password", forgotPasswordroute);
 
 const PORT = process.env.PORT || 5000;
 const databaseurl = process.env.MONGODB_URL;

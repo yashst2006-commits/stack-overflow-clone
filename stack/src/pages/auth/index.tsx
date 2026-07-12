@@ -136,6 +136,14 @@ const index = () => {
                   onChange={handleChange}
                   value={form.password}
                 />
+                <div className="text-right">
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Forgot Password?
+                  </Link>
+                </div>
               </div>
               <Button
                 type="submit"
@@ -143,11 +151,6 @@ const index = () => {
               >
                 {loading ? "loading" : "Log in"}
               </Button>
-              <div className="text-center text-sm">
-                <Link href="#" className="text-blue-600 hover:underline">
-                  Forgot your password?
-                </Link>
-              </div>
               <div className="text-center text-sm">
                 Don't have an account?{" "}
                 <Link href="/signup" className="text-blue-600 hover:underline">

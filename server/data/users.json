@@ -3,10 +3,12 @@
     "_id": "42a94a64-9144-44cc-bb03-eb38d217d03d",
     "name": "yashwanth",
     "email": "yashwanthst2006@gmail.com",
-    "password": "$2b$12$lczJ4Z5NPEwwU/sZo76RDew00kDFEqFfKtblhoTW0xc8Zyv7hJfry",
+    "phone": "9876543210",
+    "password": "$2b$12$xmbIzbGtfFI338vLsir9fuuodAZoe8GF9AWSjfuQWpBJtb3KhVTbO",
     "about": "Test",
     "tags": [],
-    "joinDate": "2026-06-14T07:24:02.823Z"
+    "joinDate": "2026-06-14T07:24:02.823Z",
+    "lastForgotPasswordReset": "2026-07-12"
   },
   {
     "_id": "39206848-850b-4388-8388-114ab4b143e3",
@@ -34,5 +36,79 @@
     "about": "",
     "tags": [],
     "joinDate": "2026-06-26T06:15:54.146Z"
+  },
+  {
+    "_id": "34e24005-a6b6-447b-9665-39708fda42da",
+    "name": "Test Phone User",
+    "email": "testuser_1783838474540@example.com",
+    "phone": "5551234540",
+    "password": "$2b$12$nrOVLRTlZl.DULu1.VYfp.3f8JhYJDzhDCJE6aNlpH/0J8MQsv5ie",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T06:41:14.954Z"
+  },
+  {
+    "_id": "ca788bdf-211c-45cd-876b-b6ae89646ddd",
+    "name": "Test Phone User",
+    "email": "testuser_1783838488623@example.com",
+    "phone": "5551234523",
+    "password": "$2b$12$6JNfwm5qzdpMtUremZcCE.Q5BmmhW/KYb59ddK7/6xlV.NJQBAu72",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T06:41:29.226Z"
+  },
+  {
+    "_id": "6f4644d9-709f-4f5d-8426-53768ad57a04",
+    "name": "blanky1106",
+    "email": "blanky1106@gmail.com",
+    "phone": "9344901663",
+    "password": "$2b$12$B2jSCwRm1Zpn6.5j4CbKQ.Gs2CwreWh97Y1v2OGmAXydsfzTzrT4W",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T06:45:26.593Z",
+    "lastForgotPasswordReset": "2026-07-12"
+  },
+  {
+    "_id": "a92c7a6e-61a7-43ee-81a3-af5ae292c7ea",
+    "name": "Phase2 Test",
+    "email": "phase2_1783840195401@test.com",
+    "phone": "7700195401",
+    "password": "$2b$12$H67oUI4VrwXLCshQG.ey6eqiYI1c0QW0ZKwzXD.QSFbsthG7wYjH.",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T07:09:55.896Z"
+  },
+  {
+    "_id": "3d527a2c-afc3-45f3-8f3a-be0946cee387",
+    "name": "Daily Limit User",
+    "email": "daily_1783848005939@example.com",
+    "phone": "9990005939",
+    "password": "$2b$12$RAYARvDBEFTWu./r8Y1GtOG.SMFHulKUL1U3Ttglgx1fWY6bDpWMi",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T09:20:06.351Z",
+    "lastForgotPasswordReset": "2026-07-12"
+  },
+  {
+    "_id": "3ea19160-d03d-41ab-ad44-468272534520",
+    "name": "Daily Limit User",
+    "email": "daily_1783848025763@example.com",
+    "phone": "9990005763",
+    "password": "$2b$12$lkUwQ2pvqD1l6KhdDDugt.ARrKrk1xkYYipsUpN7in3KcHvvwTBQi",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T09:20:26.401Z",
+    "lastForgotPasswordReset": "2026-07-12"
+  },
+  {
+    "_id": "e1709ce4-0548-4e9b-9408-33d1ff3130e6",
+    "name": "Daily Limit User",
+    "email": "daily_1783848053556@example.com",
+    "phone": "9990003556",
+    "password": "$2b$12$nMKjuWvY0s/iF3xpguRJ1Ou0mdJ8Rr4HWT1vyCe0IJz3wcU53Pbbq",
+    "about": "",
+    "tags": [],
+    "joinDate": "2026-07-12T09:20:54.139Z",
+    "lastForgotPasswordReset": "2026-07-12"
   }
 ]

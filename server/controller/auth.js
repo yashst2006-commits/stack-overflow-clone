@@ -48,22 +48,28 @@ const createToken = (currentUser) =>
   );
 
 export const Signup = async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, phone, password } = req.body;
   try {
-    if (!name || !email || !password) {
+    if (!name || !email || !phone || !password) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
     if (isMongoConnected()) {
-      const exisitinguser = await user.findOne({ email });
-      if (exisitinguser) {
-        return res.status(409).json({ message: "User already exists" });
+      const existingEmailUser = await user.findOne({ email });
+      if (existingEmailUser) {
+        return res.status(409).json({ message: "User with this email already exists" });
+      }
+
+      const existingPhoneUser = await user.findOne({ phone });
+      if (existingPhoneUser) {
+        return res.status(409).json({ message: "User with this phone number already exists" });
       }
 
       const hashpassword = await bcrypt.hash(password, 12);
       const newuser = await user.create({
         name,
         email,
+        phone,
         password: hashpassword,
       });
 
@@ -73,18 +79,25 @@ export const Signup = async (req, res) => {
     }
 
     const users = await readLocalUsers();
-    const exisitinguser = users.find(
-      (currentUser) => currentUser.email.toLowerCase() === email.toLowerCase()
+    const existingEmailUser = users.find(
+      (currentUser) => currentUser.email && currentUser.email.toLowerCase() === email.toLowerCase()
     );
+    if (existingEmailUser) {
+      return res.status(409).json({ message: "User with this email already exists" });
+    }
 
-    if (exisitinguser) {
-      return res.status(409).json({ message: "User already exists" });
+    const existingPhoneUser = users.find(
+      (currentUser) => currentUser.phone === phone
+    );
+    if (existingPhoneUser) {
+      return res.status(409).json({ message: "User with this phone number already exists" });
     }
 
     const newuser = {
       _id: randomUUID(),
       name,
       email,
+      phone,
       password: await bcrypt.hash(password, 12),
       about: "",
       tags: [],

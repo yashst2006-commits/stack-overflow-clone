@@ -30,13 +30,14 @@ export const AuthProvider = ({ children }) => {
   const [loading, setloading] = useState(false);
   const [error, seterror] = useState(null);
 
-  const Signup = async ({ name, email, password }) => {
+  const Signup = async ({ name, email, phone, password }) => {
     setloading(true);
     seterror(null);
     try {
       const res = await axiosInstance.post("/user/signup", {
         name,
         email,
+        phone,
         password,
       });
       const { data, token } = res.data;
