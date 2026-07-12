@@ -1,11 +1,15 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import mongoose from "mongoose";
+import user from "./auth.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const dataDirectory = path.join(currentDirectory, "..", "data");
 const friendsFile = path.join(dataDirectory, "friends.json");
 const usersFile = path.join(dataDirectory, "users.json");
+
+const isMongoConnected = () => mongoose.connection.readyState === 1;
 
 let mutationQueue = Promise.resolve();
 
@@ -100,6 +104,7 @@ const uniqueIds = (ids) => [
       .filter((id) => id !== undefined && id !== null)
       .map(String)
       .filter(Boolean)
+      .map((id) => id.trim())
   ),
 ];
 
@@ -141,32 +146,53 @@ const validateId = (userId, label) => {
   return userId.trim();
 };
 
-const getUsers = () => readJsonArray(usersFile, { required: true });
-
-const requireUser = (users, userId, label = "User") => {
+const requireUser = async (userId, label = "User") => {
   const validUserId = validateId(userId, label);
-  const matchedUser = users.find((user) => sameId(user._id, validUserId));
 
-  if (!matchedUser) {
-    throw new FriendModelError(404, `${label} not found`);
+  if (isMongoConnected()) {
+    if (!mongoose.Types.ObjectId.isValid(validUserId)) {
+      throw new FriendModelError(404, `${label} not found`);
+    }
+    const matchedUser = await user.findById(validUserId);
+    if (!matchedUser) {
+      throw new FriendModelError(404, `${label} not found`);
+    }
+    return String(matchedUser._id);
+  } else {
+    const users = await readJsonArray(usersFile, { required: true });
+    const matchedUser = users.find((u) => sameId(u._id, validUserId));
+    if (!matchedUser) {
+      throw new FriendModelError(404, `${label} not found`);
+    }
+    return String(matchedUser._id);
   }
-
-  return String(matchedUser._id);
 };
 
-const toPublicUser = (user) => ({
-  _id: String(user._id),
-  name: user.name,
-  about: user.about || "",
-  tags: Array.isArray(user.tags) ? user.tags : [],
-  joinDate: user.joinDate,
+const toPublicUser = (u) => ({
+  _id: String(u._id),
+  name: u.name,
+  about: u.about || "",
+  tags: Array.isArray(u.tags) ? u.tags : [],
+  joinDate: u.joinDate,
 });
 
-const populateUsers = (ids, users) =>
-  ids
-    .map((id) => users.find((user) => sameId(user._id, id)))
-    .filter(Boolean)
-    .map(toPublicUser);
+const populateUsers = async (ids) => {
+  if (!ids || ids.length === 0) return [];
+
+  if (isMongoConnected()) {
+    const matchedUsers = await user.find({ _id: { $in: ids } });
+    return ids
+      .map((id) => matchedUsers.find((u) => sameId(u._id, id)))
+      .filter(Boolean)
+      .map(toPublicUser);
+  } else {
+    const users = await readJsonArray(usersFile, { required: true });
+    return ids
+      .map((id) => users.find((u) => sameId(u._id, id)))
+      .filter(Boolean)
+      .map(toPublicUser);
+  }
+};
 
 const runMutation = (operation) => {
   const nextMutation = mutationQueue.then(operation, operation);
@@ -208,9 +234,8 @@ export const saveFriendData = async (friendData) => {
 export const sendFriendRequest = (userId, receiverId) =>
   runMutation(async () => {
     logModelOperation("Sending friend request", { userId, receiverId });
-    const users = await getUsers();
-    const currentUserId = requireUser(users, userId);
-    const targetUserId = requireUser(users, receiverId, "Receiver");
+    const currentUserId = await requireUser(userId);
+    const targetUserId = await requireUser(receiverId, "Receiver");
 
     if (sameId(currentUserId, targetUserId)) {
       throw new FriendModelError(
@@ -257,9 +282,8 @@ export const sendFriendRequest = (userId, receiverId) =>
 export const acceptFriendRequest = (userId, senderId) =>
   runMutation(async () => {
     logModelOperation("Accepting friend request", { userId, senderId });
-    const users = await getUsers();
-    const currentUserId = requireUser(users, userId);
-    const requestSenderId = requireUser(users, senderId, "Sender");
+    const currentUserId = await requireUser(userId);
+    const requestSenderId = await requireUser(senderId, "Sender");
     const friendData = await getFriendData();
     const currentUser = findRecord(friendData, currentUserId);
     const sender = findRecord(friendData, requestSenderId);
@@ -295,9 +319,8 @@ export const acceptFriendRequest = (userId, senderId) =>
 export const rejectFriendRequest = (userId, senderId) =>
   runMutation(async () => {
     logModelOperation("Rejecting friend request", { userId, senderId });
-    const users = await getUsers();
-    const currentUserId = requireUser(users, userId);
-    const requestSenderId = requireUser(users, senderId, "Sender");
+    const currentUserId = await requireUser(userId);
+    const requestSenderId = await requireUser(senderId, "Sender");
     const friendData = await getFriendData();
     const currentUser = findRecord(friendData, currentUserId);
     const sender = findRecord(friendData, requestSenderId);
@@ -323,8 +346,7 @@ export const rejectFriendRequest = (userId, senderId) =>
 
 export const getFriendList = async (userId) => {
   logModelOperation("Loading friend list", { userId });
-  const users = await getUsers();
-  const currentUserId = requireUser(users, userId);
+  const currentUserId = await requireUser(userId);
   const friendData = await getFriendData();
   const currentUser = findRecord(friendData, currentUserId) || {
     friends: [],
@@ -333,9 +355,9 @@ export const getFriendList = async (userId) => {
   };
 
   return {
-    friends: populateUsers(currentUser.friends, users),
-    pendingSent: populateUsers(currentUser.pendingSent, users),
-    pendingReceived: populateUsers(currentUser.pendingReceived, users),
+    friends: await populateUsers(currentUser.friends),
+    pendingSent: await populateUsers(currentUser.pendingSent),
+    pendingReceived: await populateUsers(currentUser.pendingReceived),
     friendCount: currentUser.friends.length,
   };
 };
@@ -343,9 +365,8 @@ export const getFriendList = async (userId) => {
 export const removeFriend = (userId, friendId) =>
   runMutation(async () => {
     logModelOperation("Removing friend", { userId, friendId });
-    const users = await getUsers();
-    const currentUserId = requireUser(users, userId);
-    const targetFriendId = requireUser(users, friendId, "Friend");
+    const currentUserId = await requireUser(userId);
+    const targetFriendId = await requireUser(friendId, "Friend");
     const friendData = await getFriendData();
     const currentUser = findRecord(friendData, currentUserId);
     const friend = findRecord(friendData, targetFriendId);
@@ -369,8 +390,7 @@ export const removeFriend = (userId, friendId) =>
 
 export const getFriendCount = async (userId) => {
   logModelOperation("Loading friend count", { userId });
-  const users = await getUsers();
-  const currentUserId = requireUser(users, userId);
+  const currentUserId = await requireUser(userId);
   const friendData = await getFriendData();
   const currentUser = findRecord(friendData, currentUserId);
 
