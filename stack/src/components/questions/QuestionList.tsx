@@ -4,11 +4,15 @@ import type { Question } from "@/services/questions";
 
 interface QuestionListProps {
   questions: Question[];
+  emptyMessage?: string;
 }
 
-export default function QuestionList({ questions }: QuestionListProps) {
+export default function QuestionList({
+  questions,
+  emptyMessage,
+}: QuestionListProps) {
   if (questions.length === 0) {
-    return <QuestionEmptyState />;
+    return <QuestionEmptyState message={emptyMessage} />;
   }
 
   return (
