@@ -13,15 +13,6 @@ import auth from "../middleware/auth.js";
 const router = express.Router();
 
 router.use(auth);
-router.use((req, res, next) => {
-  console.info("[friends:route] Route hit", {
-    method: req.method,
-    path: req.originalUrl,
-    currentUser: req.userid,
-    body: req.body,
-  });
-  next();
-});
 router.post("/request", sendRequest);
 router.post("/accept", acceptRequest);
 router.post("/reject", rejectRequest);

@@ -37,6 +37,16 @@ const handleUpload = (req, res, next) => {
 router.post("/create", auth, handleUpload, createPostController);
 router.get("/posting-status", auth, getPostingStatusController);
 router.get("/feed", getFeedController);
+router.get("/cloudinary-resource", (req, res) => {
+  const { url } = req.query;
+  if (!url) {
+    return res.status(400).json({ success: false, message: "Missing URL" });
+  }
+  if (!url.includes("cloudinary.com")) {
+    return res.status(400).json({ success: false, message: "Invalid URL source" });
+  }
+  return res.redirect(url);
+});
 router.get("/:id", getPostByIdController);
 router.delete("/:id", auth, deletePostController);
 

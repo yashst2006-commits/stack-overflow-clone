@@ -29,10 +29,6 @@ const handleFriendError = (res, error, fallbackMessage) => {
 
 export const sendRequest = async (req, res) => {
   try {
-    console.info("[friends:controller] sendRequest", {
-      currentUser: req.userid,
-      body: req.body,
-    });
     const result = await sendFriendRequest(req.userid, req.body?.receiverId);
     return res.status(201).json({
       success: true,
@@ -46,10 +42,6 @@ export const sendRequest = async (req, res) => {
 
 export const acceptRequest = async (req, res) => {
   try {
-    console.info("[friends:controller] acceptRequest", {
-      currentUser: req.userid,
-      body: req.body,
-    });
     const result = await acceptFriendRequest(req.userid, req.body?.senderId);
     return res.status(200).json({
       success: true,
@@ -63,10 +55,6 @@ export const acceptRequest = async (req, res) => {
 
 export const rejectRequest = async (req, res) => {
   try {
-    console.info("[friends:controller] rejectRequest", {
-      currentUser: req.userid,
-      body: req.body,
-    });
     await rejectFriendRequest(req.userid, req.body?.senderId);
     return res.status(200).json({
       success: true,
@@ -79,9 +67,6 @@ export const rejectRequest = async (req, res) => {
 
 export const listFriends = async (req, res) => {
   try {
-    console.info("[friends:controller] listFriends", {
-      currentUser: req.userid,
-    });
     const result = await getFriendList(req.userid);
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
@@ -91,10 +76,6 @@ export const listFriends = async (req, res) => {
 
 export const removeFriend = async (req, res) => {
   try {
-    console.info("[friends:controller] removeFriend", {
-      currentUser: req.userid,
-      friendId: req.params.friendId,
-    });
     const result = await removeFriendModel(req.userid, req.params.friendId);
     return res.status(200).json({
       success: true,
@@ -108,9 +89,6 @@ export const removeFriend = async (req, res) => {
 
 export const countFriends = async (req, res) => {
   try {
-    console.info("[friends:controller] countFriends", {
-      currentUser: req.userid,
-    });
     const friendCount = await getFriendCount(req.userid);
     return res.status(200).json({ success: true, friendCount });
   } catch (error) {

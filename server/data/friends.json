@@ -29,5 +29,21 @@
     ],
     "pendingSent": [],
     "pendingReceived": []
+  },
+  {
+    "userId": "6a3509a88832d4948c02c6b7",
+    "friends": [
+      "6a716a4324679333d5fd7585"
+    ],
+    "pendingSent": [],
+    "pendingReceived": []
+  },
+  {
+    "userId": "6a716a4324679333d5fd7585",
+    "friends": [
+      "6a3509a88832d4948c02c6b7"
+    ],
+    "pendingSent": [],
+    "pendingReceived": []
   }
 ]

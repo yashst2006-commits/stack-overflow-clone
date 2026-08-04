@@ -3,6 +3,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+import { Readable } from "stream";
+import cloudinary from "../config/cloudinary.js";
 import user from "../models/auth.js";
 import {
   createPost,
@@ -12,16 +14,13 @@ import {
   likePost,
   unlikePost,
   getLikes,
-  hasUserLiked,
   findPost,
   addComment,
   deleteComment,
   getComments,
   findComment,
   sharePost,
-  getSharedPosts,
   getShareInfo,
-  incrementShareCount,
   findOriginalPost,
   canUserCreatePost,
   getPostingStatus,
@@ -42,48 +41,54 @@ const deleteDiskFile = async (relativeUrl) => {
   }
 };
 
-// Helper to clean up newly uploaded files in req.files
+// Helper to clean up newly uploaded files in req.files (release memory references)
 const cleanupUploadedFiles = async (files) => {
   if (!files) return;
   if (files.image && files.image[0]) {
-    try {
-      await fs.unlink(files.image[0].path);
-      console.info(`[post:controller] Cleaned up image file: ${files.image[0].path}`);
-    } catch (e) {
-      console.error("[post:controller] Failed to cleanup image file", e.message);
-    }
+    files.image[0].buffer = null;
   }
   if (files.video && files.video[0]) {
-    try {
-      await fs.unlink(files.video[0].path);
-      console.info(`[post:controller] Cleaned up video file: ${files.video[0].path}`);
-    } catch (e) {
-      console.error("[post:controller] Failed to cleanup video file", e.message);
-    }
+    files.video[0].buffer = null;
+  }
+};
+
+// Helper to upload a buffer stream to Cloudinary
+const uploadToCloudinary = (fileBuffer, folder, resourceType = "auto") => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder,
+        resource_type: resourceType,
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    Readable.from(fileBuffer).pipe(uploadStream);
+  });
+};
+
+// Helper to delete an asset from Cloudinary
+const deleteFromCloudinary = async (publicId, resourceType = "image") => {
+  try {
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType,
+    });
+    console.info(`[post:controller] Cloudinary asset deleted: ${publicId}`, result);
+    return result;
+  } catch (error) {
+    console.error(`[post:controller] Error deleting Cloudinary asset ${publicId}:`, error.message);
   }
 };
 
 // Helper to fetch username (display name) by userId
 const getUserName = async (userId) => {
-  const isMongoConnected = mongoose.connection.readyState === 1;
-  if (isMongoConnected) {
-    try {
-      const matchedUser = await user.findById(userId);
-      return matchedUser ? matchedUser.name : "Unknown User";
-    } catch (e) {
-      console.error("[post:controller] MongoDB getUserName error", e.message);
-      return "Unknown User";
-    }
-  }
-
   try {
-    const usersFile = path.join(__dirname, "..", "data", "users.json");
-    const content = await fs.readFile(usersFile, "utf8");
-    const users = JSON.parse(content);
-    const matchedUser = users.find((u) => String(u._id) === String(userId));
+    const matchedUser = await user.findById(userId);
     return matchedUser ? matchedUser.name : "Unknown User";
   } catch (e) {
-    console.error("[post:controller] JSON getUserName error", e.message);
+    console.error("[post:controller] MongoDB getUserName error", e.message);
     return "Unknown User";
   }
 };
@@ -177,9 +182,57 @@ export const createPostController = async (req, res) => {
       }
     }
 
-    // 4. Resolve relative URLs for database/JSON storage
-    const imageUrl = hasImage ? `/uploads/images/${files.image[0].filename}` : null;
-    const videoUrl = hasVideo ? `/uploads/videos/${files.video[0].filename}` : null;
+    // 4. Upload to Cloudinary and resolve URLs
+    let imageUrl = null;
+    let imagePublicId = null;
+    let videoUrl = null;
+    let videoPublicId = null;
+
+    if (hasImage) {
+      try {
+        const imageResult = await uploadToCloudinary(
+          files.image[0].buffer,
+          "images",
+          "image"
+        );
+        imageUrl = imageResult.secure_url;
+        imagePublicId = imageResult.public_id;
+      } catch (err) {
+        console.error("[post:controller] Cloudinary image upload error:", err);
+        await cleanupUploadedFiles(files);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to upload image to Cloudinary",
+        });
+      }
+    }
+
+    if (hasVideo) {
+      try {
+        const videoResult = await uploadToCloudinary(
+          files.video[0].buffer,
+          "videos",
+          "video"
+        );
+        videoUrl = videoResult.secure_url;
+        videoPublicId = videoResult.public_id;
+      } catch (err) {
+        console.error("[post:controller] Cloudinary video upload error:", err);
+        // Clean up previously uploaded image from Cloudinary to avoid orphaned files
+        if (imagePublicId) {
+          try {
+            await deleteFromCloudinary(imagePublicId, "image");
+          } catch (delErr) {
+            console.error("[post:controller] Failed to cleanup image after video error:", delErr);
+          }
+        }
+        await cleanupUploadedFiles(files);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to upload video to Cloudinary",
+        });
+      }
+    }
 
     // 5. Fetch display username
     const username = await getUserName(req.userid);
@@ -191,7 +244,12 @@ export const createPostController = async (req, res) => {
       caption: hasCaption ? caption.trim() : null,
       imageUrl,
       videoUrl,
+      imagePublicId,
+      videoPublicId,
     });
+
+    // 7. Cleanup memory references
+    await cleanupUploadedFiles(files);
 
     console.info("[post:controller] Post created successfully", {
       postId: post.id,
@@ -285,11 +343,16 @@ export const deletePostController = async (req, res) => {
       });
     }
 
-    // 4. Delete files from disk first
-    if (post.imageUrl) {
+    // 4. Delete files from Cloudinary or local disk
+    if (post.imagePublicId) {
+      await deleteFromCloudinary(post.imagePublicId, "image");
+    } else if (post.imageUrl) {
       await deleteDiskFile(post.imageUrl);
     }
-    if (post.videoUrl) {
+
+    if (post.videoPublicId) {
+      await deleteFromCloudinary(post.videoPublicId, "video");
+    } else if (post.videoUrl) {
       await deleteDiskFile(post.videoUrl);
     }
 

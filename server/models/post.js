@@ -1,77 +1,81 @@
-import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { getFriendCount } from "./friend.js";
 
-const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const postsFile = path.join(currentDirectory, "..", "data", "posts.json");
-
-const isMongoConnected = () => mongoose.connection.readyState === 1;
-
 // Define Mongoose Schema for Comment
 const commentSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "user", required: true },
   username: { type: String, required: true },
   text: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now },
-});
+}, { timestamps: true });
 
-// Define Mongoose Schema for Post (Extended with likes, comments, and sharing fields)
+// Define Mongoose Schema for Post
 const postSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  username: { type: String, required: true },
-  caption: { type: String, default: null },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: "user", required: true },
+  authorName: { type: String, required: true, trim: true },
+  caption: { type: String, default: null, trim: true },
   imageUrl: { type: String, default: null },
   videoUrl: { type: String, default: null },
-  likes: { type: [String], default: [] },
-  comments: { type: [commentSchema], default: [] },
+  imagePublicId: { type: String, default: null },
+  videoPublicId: { type: String, default: null },
+  likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "user" }],
+  comments: [commentSchema],
   
   // Sharing fields
   isShared: { type: Boolean, default: false },
-  originalPostId: { type: String, default: null },
-  originalAuthorId: { type: String, default: null },
-  originalAuthor: { type: String, default: null },
-  shareCaption: { type: String, default: null },
+  originalPostId: { type: mongoose.Schema.Types.ObjectId, ref: "Post", default: null },
+  originalAuthorId: { type: mongoose.Schema.Types.ObjectId, ref: "user", default: null },
+  originalAuthor: { type: String, default: null, trim: true },
+  shareCaption: { type: String, default: null, trim: true },
   shareCount: { type: Number, default: 0 },
   
-  createdAt: { type: Date, default: Date.now },
-});
+  visibility: { type: String, default: "public", trim: true },
+}, { timestamps: true });
+
+postSchema.index({ author: 1 });
+postSchema.index({ createdAt: -1 });
+postSchema.index({ visibility: 1 });
 
 const PostModel = mongoose.models.Post || mongoose.model("Post", postSchema);
 
-// Read local JSON posts (with migration/safeguard for missing array structures)
-export const readPosts = async () => {
-  try {
-    const content = await fs.readFile(postsFile, "utf8");
-    const posts = JSON.parse(content);
-    return posts.map((p) => ({
-      ...p,
-      likes: p.likes || [],
-      comments: (p.comments || []).map((c) => ({
-        ...c,
-        id: c.id || `comment_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        createdAt: c.createdAt || new Date().toISOString(),
-      })),
-      isShared: p.isShared || false,
-      originalPostId: p.originalPostId || null,
-      originalAuthorId: p.originalAuthorId || null,
-      originalAuthor: p.originalAuthor || null,
-      shareCaption: p.shareCaption || null,
-      shareCount: p.shareCount || 0,
-    }));
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
-};
+// Map MongoDB Post document to Frontend expected object
+const mapPostToFrontend = (p) => {
+  if (!p) return null;
 
-// Write local JSON posts
-export const writePosts = async (posts) => {
-  await fs.mkdir(path.dirname(postsFile), { recursive: true });
-  await fs.writeFile(postsFile, JSON.stringify(posts, null, 2));
+  let imageUrl = p.imageUrl;
+  if (imageUrl && imageUrl.startsWith("http")) {
+    imageUrl = `/posts/cloudinary-resource?url=${encodeURIComponent(imageUrl)}`;
+  }
+
+  let videoUrl = p.videoUrl;
+  if (videoUrl && videoUrl.startsWith("http")) {
+    videoUrl = `/posts/cloudinary-resource?url=${encodeURIComponent(videoUrl)}`;
+  }
+
+  return {
+    id: p._id.toString(),
+    userId: p.author ? p.author.toString() : "",
+    username: p.authorName || "",
+    caption: p.caption,
+    imageUrl,
+    videoUrl,
+    imagePublicId: p.imagePublicId || null,
+    videoPublicId: p.videoPublicId || null,
+    likes: (p.likes || []).map((likeId) => likeId.toString()),
+    comments: (p.comments || []).map((c) => ({
+      id: c._id ? c._id.toString() : "",
+      userId: c.userId ? c.userId.toString() : "",
+      username: c.username || "",
+      text: c.text,
+      createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
+    })),
+    isShared: p.isShared || false,
+    originalPostId: p.originalPostId ? p.originalPostId.toString() : null,
+    originalAuthorId: p.originalAuthorId ? p.originalAuthorId.toString() : null,
+    originalAuthor: p.originalAuthor || null,
+    shareCaption: p.shareCaption || null,
+    shareCount: p.shareCount || 0,
+    createdAt: p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
+  };
 };
 
 // Create a post
@@ -81,159 +85,47 @@ export const createPost = async ({
   caption = null,
   imageUrl = null,
   videoUrl = null,
+  imagePublicId = null,
+  videoPublicId = null,
 }) => {
-  if (isMongoConnected()) {
-    const newPost = await PostModel.create({
-      userId,
-      username,
-      caption,
-      imageUrl,
-      videoUrl,
-      likes: [],
-      comments: [],
-      isShared: false,
-      shareCount: 0,
-    });
-    return {
-      id: newPost._id.toString(),
-      userId: newPost.userId,
-      username: newPost.username,
-      caption: newPost.caption,
-      imageUrl: newPost.imageUrl,
-      videoUrl: newPost.videoUrl,
-      likes: [],
-      comments: [],
-      isShared: false,
-      originalPostId: null,
-      originalAuthorId: null,
-      originalAuthor: null,
-      shareCaption: null,
-      shareCount: 0,
-      createdAt: newPost.createdAt.toISOString(),
-    };
-  }
-
-  const posts = await readPosts();
-  const newPost = {
-    id: `post_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-    userId,
-    username,
+  const newPost = await PostModel.create({
+    author: new mongoose.Types.ObjectId(userId.trim()),
+    authorName: username,
     caption,
     imageUrl,
     videoUrl,
+    imagePublicId,
+    videoPublicId,
     likes: [],
     comments: [],
     isShared: false,
-    originalPostId: null,
-    originalAuthorId: null,
-    originalAuthor: null,
-    shareCaption: null,
     shareCount: 0,
-    createdAt: new Date().toISOString(),
-  };
-
-  posts.push(newPost);
-  await writePosts(posts);
-  return newPost;
+  });
+  return mapPostToFrontend(newPost);
 };
 
 // Get all posts (newest first)
 export const getAllPosts = async () => {
-  if (isMongoConnected()) {
-    const mongoPosts = await PostModel.find().sort({ createdAt: -1 });
-    return mongoPosts.map((p) => ({
-      id: p._id.toString(),
-      userId: p.userId,
-      username: p.username,
-      caption: p.caption,
-      imageUrl: p.imageUrl,
-      videoUrl: p.videoUrl,
-      likes: p.likes || [],
-      comments: (p.comments || []).map((c) => ({
-        id: c._id ? c._id.toString() : c.id,
-        userId: c.userId,
-        username: c.username,
-        text: c.text,
-        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
-      })),
-      isShared: p.isShared || false,
-      originalPostId: p.originalPostId || null,
-      originalAuthorId: p.originalAuthorId || null,
-      originalAuthor: p.originalAuthor || null,
-      shareCaption: p.shareCaption || null,
-      shareCount: p.shareCount || 0,
-      createdAt: p.createdAt.toISOString(),
-    }));
-  }
-
-  const posts = await readPosts();
-  return [...posts].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  const mongoPosts = await PostModel.find().sort({ createdAt: -1 }).lean();
+  return mongoPosts.map(mapPostToFrontend);
 };
 
 // Get post by ID
 export const getPostById = async (id) => {
-  if (isMongoConnected()) {
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return null;
-    }
-    const p = await PostModel.findById(id);
-    if (!p) return null;
-    return {
-      id: p._id.toString(),
-      userId: p.userId,
-      username: p.username,
-      caption: p.caption,
-      imageUrl: p.imageUrl,
-      videoUrl: p.videoUrl,
-      likes: p.likes || [],
-      comments: (p.comments || []).map((c) => ({
-        id: c._id ? c._id.toString() : c.id,
-        userId: c.userId,
-        username: c.username,
-        text: c.text,
-        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
-      })),
-      isShared: p.isShared || false,
-      originalPostId: p.originalPostId || null,
-      originalAuthorId: p.originalAuthorId || null,
-      originalAuthor: p.originalAuthor || null,
-      shareCaption: p.shareCaption || null,
-      shareCount: p.shareCount || 0,
-      createdAt: p.createdAt.toISOString(),
-    };
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return null;
   }
-
-  const posts = await readPosts();
-  const matched = posts.find((p) => p.id === id);
-  if (matched) {
-    matched.likes = matched.likes || [];
-    matched.comments = matched.comments || [];
-    matched.isShared = matched.isShared || false;
-    matched.shareCount = matched.shareCount || 0;
-  }
-  return matched || null;
+  const p = await PostModel.findById(id);
+  return mapPostToFrontend(p);
 };
 
 // Delete post by ID
 export const deletePost = async (id) => {
-  if (isMongoConnected()) {
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return false;
-    }
-    const result = await PostModel.findByIdAndDelete(id);
-    return !!result;
-  }
-
-  const posts = await readPosts();
-  const index = posts.findIndex((p) => p.id === id);
-  if (index === -1) {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
     return false;
   }
-  posts.splice(index, 1);
-  await writePosts(posts);
-  return true;
+  const result = await PostModel.findByIdAndDelete(id);
+  return !!result;
 };
 
 // Helper function to find a post
@@ -241,84 +133,64 @@ export const findPost = async (postId) => {
   return await getPostById(postId);
 };
 
-// Helper function to save posts
+// Reusable/no-op helper to save posts (not needed for direct DB mutations, but kept for compatibility)
 export const savePosts = async (posts) => {
-  await writePosts(posts);
+  // Database updates are persisted directly in methods, no-op here
 };
 
 // Like a post
 export const likePost = async (postId, userId) => {
-  if (isMongoConnected()) {
-    const p = await PostModel.findById(postId);
-    if (!p) {
-      const err = new Error("Post not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    if (p.likes.includes(userId)) {
-      const err = new Error("Already liked");
-      err.statusCode = 400;
-      throw err;
-    }
-    p.likes.push(userId);
-    await p.save();
-    return p.likes.length;
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
+    const err = new Error("Invalid post ID");
+    err.statusCode = 400;
+    throw err;
   }
+  const userObjectId = new mongoose.Types.ObjectId(userId.trim());
 
-  const posts = await readPosts();
-  const pIndex = posts.findIndex((item) => item.id === postId);
-  if (pIndex === -1) {
+  const p = await PostModel.findById(postId);
+  if (!p) {
     const err = new Error("Post not found");
     err.statusCode = 404;
     throw err;
   }
-  const p = posts[pIndex];
-  p.likes = p.likes || [];
-  if (p.likes.includes(userId)) {
+
+  const alreadyLiked = p.likes.some((id) => id.toString() === userObjectId.toString());
+  if (alreadyLiked) {
     const err = new Error("Already liked");
     err.statusCode = 400;
     throw err;
   }
-  p.likes.push(userId);
-  await writePosts(posts);
+
+  p.likes.push(userObjectId);
+  await p.save();
   return p.likes.length;
 };
 
 // Unlike a post
 export const unlikePost = async (postId, userId) => {
-  if (isMongoConnected()) {
-    const p = await PostModel.findById(postId);
-    if (!p) {
-      const err = new Error("Post not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    if (!p.likes.includes(userId)) {
-      const err = new Error("Not previously liked");
-      err.statusCode = 400;
-      throw err;
-    }
-    p.likes = p.likes.filter((id) => id !== userId);
-    await p.save();
-    return p.likes.length;
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
+    const err = new Error("Invalid post ID");
+    err.statusCode = 400;
+    throw err;
   }
+  const userObjectId = new mongoose.Types.ObjectId(userId.trim());
 
-  const posts = await readPosts();
-  const pIndex = posts.findIndex((item) => item.id === postId);
-  if (pIndex === -1) {
+  const p = await PostModel.findById(postId);
+  if (!p) {
     const err = new Error("Post not found");
     err.statusCode = 404;
     throw err;
   }
-  const p = posts[pIndex];
-  p.likes = p.likes || [];
-  if (!p.likes.includes(userId)) {
+
+  const isLiked = p.likes.some((id) => id.toString() === userObjectId.toString());
+  if (!isLiked) {
     const err = new Error("Not previously liked");
     err.statusCode = 400;
     throw err;
   }
-  p.likes = p.likes.filter((id) => id !== userId);
-  await writePosts(posts);
+
+  p.likes = p.likes.filter((id) => id.toString() !== userObjectId.toString());
+  await p.save();
   return p.likes.length;
 };
 
@@ -336,94 +208,67 @@ export const getLikes = async (postId) => {
 // Check if a user has liked a post
 export const hasUserLiked = async (postId, userId) => {
   const likes = await getLikes(postId);
-  return likes.includes(userId);
+  return likes.includes(userId.trim());
 };
 
 // Add comment to a post
 export const addComment = async (postId, { userId, username, text }) => {
-  if (isMongoConnected()) {
-    const p = await PostModel.findById(postId);
-    if (!p) {
-      const err = new Error("Post not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    const newComment = {
-      userId,
-      username,
-      text,
-      createdAt: new Date(),
-    };
-    p.comments.push(newComment);
-    await p.save();
-    const created = p.comments[p.comments.length - 1];
-    return {
-      id: created._id.toString(),
-      userId: created.userId,
-      username: created.username,
-      text: created.text,
-      createdAt: created.createdAt.toISOString(),
-    };
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
+    const err = new Error("Invalid post ID");
+    err.statusCode = 400;
+    throw err;
   }
 
-  const posts = await readPosts();
-  const pIndex = posts.findIndex((item) => item.id === postId);
-  if (pIndex === -1) {
+  const p = await PostModel.findById(postId);
+  if (!p) {
     const err = new Error("Post not found");
     err.statusCode = 404;
     throw err;
   }
-  const p = posts[pIndex];
-  p.comments = p.comments || [];
+
   const newComment = {
-    id: `comment_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-    userId,
+    userId: new mongoose.Types.ObjectId(userId.trim()),
     username,
     text,
-    createdAt: new Date().toISOString(),
   };
+
   p.comments.push(newComment);
-  await writePosts(posts);
-  return newComment;
+  await p.save();
+  
+  const created = p.comments[p.comments.length - 1];
+  return {
+    id: created._id.toString(),
+    userId: created.userId.toString(),
+    username: created.username,
+    text: created.text,
+    createdAt: created.createdAt.toISOString(),
+  };
 };
 
 // Delete comment from a post
 export const deleteComment = async (postId, commentId) => {
-  if (isMongoConnected()) {
-    const p = await PostModel.findById(postId);
-    if (!p) {
-      const err = new Error("Post not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    const comment = p.comments.id(commentId);
-    if (!comment) {
-      const err = new Error("Comment not found");
-      err.statusCode = 404;
-      throw err;
-    }
-    p.comments.pull(commentId);
-    await p.save();
-    return p.comments.length;
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
+    const err = new Error("Invalid post ID");
+    err.statusCode = 400;
+    throw err;
   }
 
-  const posts = await readPosts();
-  const pIndex = posts.findIndex((item) => item.id === postId);
-  if (pIndex === -1) {
+  const p = await PostModel.findById(postId);
+  if (!p) {
     const err = new Error("Post not found");
     err.statusCode = 404;
     throw err;
   }
-  const p = posts[pIndex];
-  p.comments = p.comments || [];
-  const cIndex = p.comments.findIndex((c) => String(c.id) === String(commentId));
-  if (cIndex === -1) {
+
+  const comment = p.comments.id(commentId);
+  if (!comment) {
     const err = new Error("Comment not found");
     err.statusCode = 404;
     throw err;
   }
-  p.comments.splice(cIndex, 1);
-  await writePosts(posts);
+
+  p.comments.pull(commentId);
+  await p.save();
   return p.comments.length;
 };
 
@@ -456,22 +301,13 @@ export const findComment = async (postId, commentId) => {
 
 // Increment share count of a post
 export const incrementShareCount = async (postId) => {
-  if (isMongoConnected()) {
-    const p = await PostModel.findById(postId);
-    if (p) {
-      p.shareCount = (p.shareCount || 0) + 1;
-      await p.save();
-      return p.shareCount;
-    }
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
     return 0;
   }
-
-  const posts = await readPosts();
-  const pIndex = posts.findIndex((item) => item.id === postId);
-  if (pIndex !== -1) {
-    const p = posts[pIndex];
+  const p = await PostModel.findById(postId);
+  if (p) {
     p.shareCount = (p.shareCount || 0) + 1;
-    await writePosts(posts);
+    await p.save();
     return p.shareCount;
   }
   return 0;
@@ -494,60 +330,21 @@ export const sharePost = async (postId, userId, username, shareCaption) => {
   // Increment original post's share count
   const totalShares = await incrementShareCount(postId);
 
-  if (isMongoConnected()) {
-    const newShare = await PostModel.create({
-      userId,
-      username,
-      isShared: true,
-      originalPostId: origPost.id,
-      originalAuthorId: origPost.userId,
-      originalAuthor: origPost.username,
-      shareCaption: shareCaption || null,
-      likes: [],
-      comments: [],
-      shareCount: 0,
-    });
-
-    return {
-      sharedPost: {
-        id: newShare._id.toString(),
-        userId: newShare.userId,
-        username: newShare.username,
-        isShared: true,
-        originalPostId: newShare.originalPostId,
-        originalAuthorId: newShare.originalAuthorId,
-        originalAuthor: newShare.originalAuthor,
-        shareCaption: newShare.shareCaption,
-        likes: [],
-        comments: [],
-        shareCount: 0,
-        createdAt: newShare.createdAt.toISOString(),
-      },
-      totalShares,
-    };
-  }
-
-  const posts = await readPosts();
-  const newShare = {
-    id: `share_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-    userId,
-    username,
+  const newShare = await PostModel.create({
+    author: new mongoose.Types.ObjectId(userId.trim()),
+    authorName: username,
     isShared: true,
-    originalPostId: origPost.id,
-    originalAuthorId: origPost.userId,
+    originalPostId: new mongoose.Types.ObjectId(origPost.id),
+    originalAuthorId: new mongoose.Types.ObjectId(origPost.userId),
     originalAuthor: origPost.username,
     shareCaption: shareCaption || null,
     likes: [],
     comments: [],
     shareCount: 0,
-    createdAt: new Date().toISOString(),
-  };
-
-  posts.push(newShare);
-  await writePosts(posts);
+  });
 
   return {
-    sharedPost: newShare,
+    sharedPost: mapPostToFrontend(newShare),
     totalShares,
   };
 };
@@ -567,15 +364,15 @@ export const getShareInfo = async (postId) => {
     throw err;
   }
 
-  const allPosts = await getAllPosts();
-  const shares = allPosts.filter(
-    (p) => p.isShared === true && String(p.originalPostId) === String(postId)
-  );
+  const allShares = await PostModel.find({
+    isShared: true,
+    originalPostId: new mongoose.Types.ObjectId(postId),
+  }).sort({ createdAt: -1 });
 
-  const sharedBy = shares.map((p) => ({
-    userId: p.userId,
-    username: p.username,
-    sharedAt: p.createdAt,
+  const sharedBy = allShares.map((p) => ({
+    userId: p.author ? p.author.toString() : "",
+    username: p.authorName,
+    sharedAt: p.createdAt.toISOString(),
   }));
 
   return {
@@ -604,15 +401,16 @@ export const getAcceptedFriendCount = async (userId) => {
 
 // Count only original (not shared) posts created today in local timezone
 export const countTodaysPosts = async (userId, timezone) => {
-  const allPosts = await getAllPosts();
   const todayStr = getLocalDateString(new Date(), timezone);
+  const userObjectId = new mongoose.Types.ObjectId(userId.trim());
 
-  const todaysPosts = allPosts.filter((p) => {
-    return (
-      String(p.userId) === String(userId) &&
-      p.isShared !== true &&
-      getLocalDateString(p.createdAt, timezone) === todayStr
-    );
+  const mongoPosts = await PostModel.find({
+    author: userObjectId,
+    isShared: { $ne: true },
+  });
+
+  const todaysPosts = mongoPosts.filter((p) => {
+    return getLocalDateString(p.createdAt, timezone) === todayStr;
   });
 
   return todaysPosts.length;
@@ -627,21 +425,14 @@ export const calculateDailyLimit = (friendCount) => {
 
 // Check if user is allowed to create post
 export const canUserCreatePost = async (userId, timezone) => {
-  const friendCount = await getAcceptedFriendCount(userId);
+  const [friendCount, postsToday] = await Promise.all([
+    getAcceptedFriendCount(userId),
+    countTodaysPosts(userId, timezone),
+  ]);
   const dailyLimit = calculateDailyLimit(friendCount);
-  
-  if (dailyLimit === null) {
-    return {
-      allowed: true,
-      friendCount,
-      dailyLimit,
-      postsToday: await countTodaysPosts(userId, timezone),
-    };
-  }
 
-  const postsToday = await countTodaysPosts(userId, timezone);
   return {
-    allowed: postsToday < dailyLimit,
+    allowed: dailyLimit === null || postsToday < dailyLimit,
     friendCount,
     dailyLimit,
     postsToday,
@@ -650,9 +441,11 @@ export const canUserCreatePost = async (userId, timezone) => {
 
 // Get general posting status
 export const getPostingStatus = async (userId, timezone) => {
-  const friendCount = await getAcceptedFriendCount(userId);
+  const [friendCount, postsToday] = await Promise.all([
+    getAcceptedFriendCount(userId),
+    countTodaysPosts(userId, timezone),
+  ]);
   const dailyLimit = calculateDailyLimit(friendCount);
-  const postsToday = await countTodaysPosts(userId, timezone);
   const unlimited = dailyLimit === null;
   const remainingPosts = unlimited ? null : Math.max(0, dailyLimit - postsToday);
 
@@ -664,3 +457,4 @@ export const getPostingStatus = async (userId, timezone) => {
     unlimited,
   };
 };
+export { PostModel };

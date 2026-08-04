@@ -11,19 +11,31 @@ import forgotPasswordroute from "./routes/forgotPassword.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
+dotenv.config();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-dotenv.config();
+// ── Validate required environment variables ──────────────────────────────────
+const REQUIRED_ENV = ["MONGODB_URL", "JWT_SECRET", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[startup] Missing required environment variable: ${key}`);
+    process.exit(1);
+  }
+}
 
-app.use(express.json({ limit: "30mb", extended: true }));
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+app.use(express.json({ limit: "30mb" }));
 app.use(express.urlencoded({ limit: "30mb", extended: true }));
 app.use(cors());
+// Keep /uploads static for backward compatibility with existing local media posts
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.get("/", (req, res) => {
-  res.send("Stackoverflow clone is running perfect");
+  res.json({ success: true, message: "Stack Overflow Clone API is running" });
 });
 
 app.use("/user", userroutes);
@@ -34,34 +46,15 @@ app.use("/friends", friendroutes);
 app.use("/posts", postroutes);
 app.use("/forgot-password", forgotPasswordroute);
 
-const PORT = process.env.PORT || 5000;
-const databaseurl = process.env.MONGODB_URL;
-
-if (!databaseurl) {
-  console.warn(
-    "MONGODB_URL is not configured. Using local file storage for auth in development."
-  );
-}
-
-if (!process.env.JWT_SECRET) {
-  process.env.JWT_SECRET = "stack-overflow-clone-dev-secret";
-  console.warn("JWT_SECRET is not configured. Using a development-only secret.");
-}
-
-if (databaseurl) {
-  mongoose
-    .connect(databaseurl, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => {
-      console.log("Connected to MongoDB");
-      app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
-      });
-    })
-    .catch((err) => {
-      console.error("MongoDB connection error:", err.message);
+mongoose
+  .connect(process.env.MONGODB_URL)
+  .then(() => {
+    console.info("[startup] Connected to MongoDB");
+    app.listen(PORT, () => {
+      console.info(`[startup] Server running on port ${PORT}`);
     });
-} else {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  })
+  .catch((err) => {
+    console.error("[startup] MongoDB connection error:", err.message);
+    process.exit(1);
   });
-}

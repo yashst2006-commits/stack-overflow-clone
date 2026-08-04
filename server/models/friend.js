@@ -1,21 +1,10 @@
-import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
 import mongoose from "mongoose";
-import user from "./auth.js";
+import User from "./auth.js";
+import FriendRequest from "./FriendRequest.js";
 
-const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const dataDirectory = path.join(currentDirectory, "..", "data");
-const friendsFile = path.join(dataDirectory, "friends.json");
-const usersFile = path.join(dataDirectory, "users.json");
-
-const isMongoConnected = () => mongoose.connection.readyState === 1;
-
-let mutationQueue = Promise.resolve();
-
-const logModelOperation = (message, details = {}) => {
-  console.info(`[friends:model] ${message}`, details);
-};
+// ---------------------------------------------------------------------------
+// Error class (preserved from original)
+// ---------------------------------------------------------------------------
 
 export class FriendModelError extends Error {
   constructor(statusCode, message) {
@@ -25,149 +14,35 @@ export class FriendModelError extends Error {
   }
 }
 
-const readJsonArray = async (
-  filePath,
-  { createIfMissing = false, required = false } = {}
-) => {
-  try {
-    const content = await fs.readFile(filePath, "utf8");
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
-    if (!content.trim()) {
-      if (createIfMissing) {
-        await fs.writeFile(filePath, "[]\n");
-        logModelOperation("Initialized empty JSON file", { filePath });
-        return [];
-      }
 
-      throw new FriendModelError(
-        500,
-        `${path.basename(filePath)} is empty`
-      );
-    }
 
-    let parsedContent;
 
-    try {
-      parsedContent = JSON.parse(content);
-    } catch (error) {
-      console.error("[friends:model] Invalid JSON", {
-        filePath,
-        message: error.message,
-      });
-      throw new FriendModelError(
-        500,
-        `${path.basename(filePath)} contains invalid JSON`
-      );
-    }
-
-    if (!Array.isArray(parsedContent)) {
-      throw new FriendModelError(
-        500,
-        `${path.basename(filePath)} must contain a JSON array`
-      );
-    }
-
-    logModelOperation("Read JSON data", {
-      filePath,
-      recordCount: parsedContent.length,
-    });
-    return parsedContent;
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      if (required) {
-        throw new FriendModelError(
-          500,
-          `${path.basename(filePath)} was not found`
-        );
-      }
-
-      if (createIfMissing) {
-        await fs.mkdir(path.dirname(filePath), { recursive: true });
-        await fs.writeFile(filePath, "[]\n");
-        logModelOperation("Created missing JSON file", { filePath });
-      }
-
-      return [];
-    }
-
-    throw error;
-  }
-};
-
-const sameId = (firstId, secondId) => String(firstId) === String(secondId);
-const containsId = (ids, targetId) => ids.some((id) => sameId(id, targetId));
-const withoutId = (ids, targetId) => ids.filter((id) => !sameId(id, targetId));
-
-const uniqueIds = (ids) => [
-  ...new Set(
-    ids
-      .filter((id) => id !== undefined && id !== null)
-      .map(String)
-      .filter(Boolean)
-      .map((id) => id.trim())
-  ),
-];
-
-const normalizeRecord = (record) => ({
-  userId: String(record.userId),
-  friends: Array.isArray(record.friends) ? uniqueIds(record.friends) : [],
-  pendingSent: Array.isArray(record.pendingSent)
-    ? uniqueIds(record.pendingSent)
-    : [],
-  pendingReceived: Array.isArray(record.pendingReceived)
-    ? uniqueIds(record.pendingReceived)
-    : [],
-});
-
-const findRecord = (friendData, userId) =>
-  friendData.find((record) => sameId(record.userId, userId));
-
-const findOrCreateRecord = (friendData, userId) => {
-  let record = findRecord(friendData, userId);
-
-  if (!record) {
-    record = {
-      userId: String(userId),
-      friends: [],
-      pendingSent: [],
-      pendingReceived: [],
-    };
-    friendData.push(record);
-  }
-
-  return record;
-};
-
-const validateId = (userId, label) => {
-  if (typeof userId !== "string" || userId.trim().length === 0) {
+/** Safely parse a string into a Mongoose ObjectId, or throw 404. */
+const toObjectId = (id, label = "User") => {
+  if (!id || typeof id !== "string" || id.trim().length === 0) {
     throw new FriendModelError(400, `${label} ID is required`);
   }
-
-  return userId.trim();
-};
-
-const requireUser = async (userId, label = "User") => {
-  const validUserId = validateId(userId, label);
-
-  if (isMongoConnected()) {
-    if (!mongoose.Types.ObjectId.isValid(validUserId)) {
-      throw new FriendModelError(404, `${label} not found`);
-    }
-    const matchedUser = await user.findById(validUserId);
-    if (!matchedUser) {
-      throw new FriendModelError(404, `${label} not found`);
-    }
-    return String(matchedUser._id);
-  } else {
-    const users = await readJsonArray(usersFile, { required: true });
-    const matchedUser = users.find((u) => sameId(u._id, validUserId));
-    if (!matchedUser) {
-      throw new FriendModelError(404, `${label} not found`);
-    }
-    return String(matchedUser._id);
+  if (!mongoose.Types.ObjectId.isValid(id.trim())) {
+    throw new FriendModelError(404, `${label} not found`);
   }
+  return new mongoose.Types.ObjectId(id.trim());
 };
 
+/** Fetch a User by string ID and throw FriendModelError if not found. */
+const requireUser = async (id, label = "User") => {
+  const oid = toObjectId(id, label);
+  const found = await User.findById(oid);
+  if (!found) {
+    throw new FriendModelError(404, `${label} not found`);
+  }
+  return found;
+};
+
+/** Shape a User document into the public format expected by the frontend. */
 const toPublicUser = (u) => ({
   _id: String(u._id),
   name: u.name,
@@ -176,223 +51,241 @@ const toPublicUser = (u) => ({
   joinDate: u.joinDate,
 });
 
-const populateUsers = async (ids) => {
-  if (!ids || ids.length === 0) return [];
+// ---------------------------------------------------------------------------
+// Exported model functions
+// ---------------------------------------------------------------------------
 
-  if (isMongoConnected()) {
-    const matchedUsers = await user.find({ _id: { $in: ids } });
-    return ids
-      .map((id) => matchedUsers.find((u) => sameId(u._id, id)))
-      .filter(Boolean)
-      .map(toPublicUser);
-  } else {
-    const users = await readJsonArray(usersFile, { required: true });
-    return ids
-      .map((id) => users.find((u) => sameId(u._id, id)))
-      .filter(Boolean)
-      .map(toPublicUser);
+/**
+ * Send a friend request from userId → receiverId.
+ * Returns { receiverId: string }.
+ */
+export const sendFriendRequest = async (userId, receiverId) => {
+  logModelOperation("Sending friend request", { userId, receiverId });
+
+  const [sender, receiver] = await Promise.all([
+    requireUser(userId, "User"),
+    requireUser(receiverId, "Receiver"),
+  ]);
+
+  if (String(sender._id) === String(receiver._id)) {
+    throw new FriendModelError(
+      400,
+      "You cannot send a friend request to yourself"
+    );
   }
-};
 
-const runMutation = (operation) => {
-  const nextMutation = mutationQueue.then(operation, operation);
-  mutationQueue = nextMutation.then(
-    () => undefined,
-    () => undefined
+  // Check if already friends
+  const alreadyFriends = sender.friends.some(
+    (fid) => String(fid) === String(receiver._id)
   );
-  return nextMutation;
-};
-
-export const getFriendData = async () => {
-  const data = await readJsonArray(friendsFile, { createIfMissing: true });
-  const validRecords = data.filter(
-    (record) => record && record.userId !== undefined && record.userId !== null
-  );
-
-  if (validRecords.length !== data.length) {
-    console.warn("[friends:model] Ignored malformed friend records", {
-      ignoredCount: data.length - validRecords.length,
-    });
+  if (alreadyFriends) {
+    throw new FriendModelError(409, "You are already friends with this user");
   }
 
-  return validRecords.map(normalizeRecord);
-};
-
-export const saveFriendData = async (friendData) => {
-  if (!Array.isArray(friendData)) {
-    throw new TypeError("Friend data must be an array");
-  }
-
-  await fs.mkdir(dataDirectory, { recursive: true });
-  await fs.writeFile(friendsFile, `${JSON.stringify(friendData, null, 2)}\n`);
-  logModelOperation("Saved friend data", {
-    filePath: friendsFile,
-    recordCount: friendData.length,
+  // Check for an existing pending request in either direction
+  const existing = await FriendRequest.findOne({
+    $or: [
+      { sender: sender._id, receiver: receiver._id },
+      { sender: receiver._id, receiver: sender._id },
+    ],
+    status: "pending",
   });
-};
 
-export const sendFriendRequest = (userId, receiverId) =>
-  runMutation(async () => {
-    logModelOperation("Sending friend request", { userId, receiverId });
-    const currentUserId = await requireUser(userId);
-    const targetUserId = await requireUser(receiverId, "Receiver");
-
-    if (sameId(currentUserId, targetUserId)) {
-      throw new FriendModelError(
-        400,
-        "You cannot send a friend request to yourself"
-      );
-    }
-
-    const friendData = await getFriendData();
-    const currentUser = findOrCreateRecord(friendData, currentUserId);
-    const receiver = findOrCreateRecord(friendData, targetUserId);
-
-    if (
-      containsId(currentUser.friends, targetUserId) ||
-      containsId(receiver.friends, currentUserId)
-    ) {
-      throw new FriendModelError(409, "You are already friends with this user");
-    }
-
-    if (
-      containsId(currentUser.pendingSent, targetUserId) ||
-      containsId(receiver.pendingReceived, currentUserId)
-    ) {
+  if (existing) {
+    if (String(existing.sender) === String(sender._id)) {
       throw new FriendModelError(409, "Friend request already sent");
-    }
-
-    if (
-      containsId(currentUser.pendingReceived, targetUserId) ||
-      containsId(receiver.pendingSent, currentUserId)
-    ) {
+    } else {
       throw new FriendModelError(
         409,
         "This user has already sent you a friend request"
       );
     }
+  }
 
-    currentUser.pendingSent.push(targetUserId);
-    receiver.pendingReceived.push(currentUserId);
-    await saveFriendData(friendData);
+  await FriendRequest.create({ sender: sender._id, receiver: receiver._id });
 
-    return { receiverId: targetUserId };
+  logModelOperation("Friend request sent", {
+    senderId: String(sender._id),
+    receiverId: String(receiver._id),
   });
 
-export const acceptFriendRequest = (userId, senderId) =>
-  runMutation(async () => {
-    logModelOperation("Accepting friend request", { userId, senderId });
-    const currentUserId = await requireUser(userId);
-    const requestSenderId = await requireUser(senderId, "Sender");
-    const friendData = await getFriendData();
-    const currentUser = findRecord(friendData, currentUserId);
-    const sender = findRecord(friendData, requestSenderId);
+  return { receiverId: String(receiver._id) };
+};
 
-    const requestExists =
-      currentUser &&
-      sender &&
-      containsId(currentUser.pendingReceived, requestSenderId) &&
-      containsId(sender.pendingSent, currentUserId);
+/**
+ * Accept a pending friend request.
+ * Returns { friendCount: number }.
+ */
+export const acceptFriendRequest = async (userId, senderId) => {
+  logModelOperation("Accepting friend request", { userId, senderId });
 
-    if (!requestExists) {
-      throw new FriendModelError(404, "Friend request not found");
-    }
+  const [currentUser, requestSender] = await Promise.all([
+    requireUser(userId, "User"),
+    requireUser(senderId, "Sender"),
+  ]);
 
-    currentUser.pendingReceived = withoutId(
-      currentUser.pendingReceived,
-      requestSenderId
-    );
-    sender.pendingSent = withoutId(sender.pendingSent, currentUserId);
-
-    if (!containsId(currentUser.friends, requestSenderId)) {
-      currentUser.friends.push(requestSenderId);
-    }
-
-    if (!containsId(sender.friends, currentUserId)) {
-      sender.friends.push(currentUserId);
-    }
-
-    await saveFriendData(friendData);
-    return { friendCount: currentUser.friends.length };
+  const request = await FriendRequest.findOne({
+    sender: requestSender._id,
+    receiver: currentUser._id,
+    status: "pending",
   });
 
-export const rejectFriendRequest = (userId, senderId) =>
-  runMutation(async () => {
-    logModelOperation("Rejecting friend request", { userId, senderId });
-    const currentUserId = await requireUser(userId);
-    const requestSenderId = await requireUser(senderId, "Sender");
-    const friendData = await getFriendData();
-    const currentUser = findRecord(friendData, currentUserId);
-    const sender = findRecord(friendData, requestSenderId);
+  if (!request) {
+    throw new FriendModelError(404, "Friend request not found");
+  }
 
-    if (
-      !currentUser ||
-      !containsId(currentUser.pendingReceived, requestSenderId)
-    ) {
-      throw new FriendModelError(404, "Friend request not found");
-    }
+  // Mark request as accepted
+  request.status = "accepted";
+  await request.save();
 
-    currentUser.pendingReceived = withoutId(
-      currentUser.pendingReceived,
-      requestSenderId
-    );
+  // Add each user to the other's friends array (idempotent via $addToSet)
+  await Promise.all([
+    User.findByIdAndUpdate(currentUser._id, {
+      $addToSet: { friends: requestSender._id },
+    }),
+    User.findByIdAndUpdate(requestSender._id, {
+      $addToSet: { friends: currentUser._id },
+    }),
+  ]);
 
-    if (sender) {
-      sender.pendingSent = withoutId(sender.pendingSent, currentUserId);
-    }
+  // Return updated friend count for the accepting user
+  const updated = await User.findById(currentUser._id, "friends");
+  const friendCount = updated ? updated.friends.length : 0;
 
-    await saveFriendData(friendData);
+  logModelOperation("Friend request accepted", {
+    userId: String(currentUser._id),
+    senderId: String(requestSender._id),
+    friendCount,
   });
 
+  return { friendCount };
+};
+
+/**
+ * Reject a pending friend request.
+ */
+export const rejectFriendRequest = async (userId, senderId) => {
+  logModelOperation("Rejecting friend request", { userId, senderId });
+
+  const [currentUser, requestSender] = await Promise.all([
+    requireUser(userId, "User"),
+    requireUser(senderId, "Sender"),
+  ]);
+
+  const request = await FriendRequest.findOne({
+    sender: requestSender._id,
+    receiver: currentUser._id,
+    status: "pending",
+  });
+
+  if (!request) {
+    throw new FriendModelError(404, "Friend request not found");
+  }
+
+  request.status = "rejected";
+  await request.save();
+
+  logModelOperation("Friend request rejected", {
+    userId: String(currentUser._id),
+    senderId: String(requestSender._id),
+  });
+};
+
+/**
+ * Get the full friend list + pending requests for a user.
+ * Returns { friends, pendingSent, pendingReceived, friendCount }.
+ */
 export const getFriendList = async (userId) => {
   logModelOperation("Loading friend list", { userId });
-  const currentUserId = await requireUser(userId);
-  const friendData = await getFriendData();
-  const currentUser = findRecord(friendData, currentUserId) || {
-    friends: [],
-    pendingSent: [],
-    pendingReceived: [],
-  };
+
+  const oid = toObjectId(userId, "User");
+
+  // Fetch populated friends list, sent pending requests, and received pending requests in parallel
+  const [populated, sentRequests, receivedRequests] = await Promise.all([
+    User.findById(oid).populate("friends", "_id name about tags joinDate").lean(),
+    FriendRequest.find({ sender: oid, status: "pending" })
+      .populate("receiver", "_id name about tags joinDate")
+      .lean(),
+    FriendRequest.find({ receiver: oid, status: "pending" })
+      .populate("sender", "_id name about tags joinDate")
+      .lean(),
+  ]);
+
+  if (!populated) {
+    throw new FriendModelError(404, "User not found");
+  }
+
+  const friends = (populated.friends || []).map(toPublicUser);
+
+  const pendingSent = sentRequests
+    .filter((r) => r.receiver)
+    .map((r) => toPublicUser(r.receiver));
+
+  const pendingReceived = receivedRequests
+    .filter((r) => r.sender)
+    .map((r) => toPublicUser(r.sender));
 
   return {
-    friends: await populateUsers(currentUser.friends),
-    pendingSent: await populateUsers(currentUser.pendingSent),
-    pendingReceived: await populateUsers(currentUser.pendingReceived),
-    friendCount: currentUser.friends.length,
+    friends,
+    pendingSent,
+    pendingReceived,
+    friendCount: friends.length,
   };
 };
 
-export const removeFriend = (userId, friendId) =>
-  runMutation(async () => {
-    logModelOperation("Removing friend", { userId, friendId });
-    const currentUserId = await requireUser(userId);
-    const targetFriendId = await requireUser(friendId, "Friend");
-    const friendData = await getFriendData();
-    const currentUser = findRecord(friendData, currentUserId);
-    const friend = findRecord(friendData, targetFriendId);
+/**
+ * Remove an accepted friend.
+ * Returns { friendCount: number }.
+ */
+export const removeFriend = async (userId, friendId) => {
+  logModelOperation("Removing friend", { userId, friendId });
 
-    if (
-      !currentUser ||
-      !containsId(currentUser.friends, targetFriendId)
-    ) {
-      throw new FriendModelError(404, "Friendship not found");
-    }
+  const [currentUser, targetFriend] = await Promise.all([
+    requireUser(userId, "User"),
+    requireUser(friendId, "Friend"),
+  ]);
 
-    currentUser.friends = withoutId(currentUser.friends, targetFriendId);
+  const isFriends = currentUser.friends.some(
+    (fid) => String(fid) === String(targetFriend._id)
+  );
 
-    if (friend) {
-      friend.friends = withoutId(friend.friends, currentUserId);
-    }
+  if (!isFriends) {
+    throw new FriendModelError(404, "Friendship not found");
+  }
 
-    await saveFriendData(friendData);
-    return { friendCount: currentUser.friends.length };
+  // Remove from both sides
+  await Promise.all([
+    User.findByIdAndUpdate(currentUser._id, {
+      $pull: { friends: targetFriend._id },
+    }),
+    User.findByIdAndUpdate(targetFriend._id, {
+      $pull: { friends: currentUser._id },
+    }),
+  ]);
+
+  const updated = await User.findById(currentUser._id, "friends");
+  const friendCount = updated ? updated.friends.length : 0;
+
+  logModelOperation("Friend removed", {
+    userId: String(currentUser._id),
+    friendId: String(targetFriend._id),
+    friendCount,
   });
 
+  return { friendCount };
+};
+
+/**
+ * Get the accepted friend count for a user.
+ * Used by models/post.js for posting restriction.
+ */
 export const getFriendCount = async (userId) => {
   logModelOperation("Loading friend count", { userId });
-  const currentUserId = await requireUser(userId);
-  const friendData = await getFriendData();
-  const currentUser = findRecord(friendData, currentUserId);
 
-  return currentUser ? currentUser.friends.length : 0;
+  if (!userId || !mongoose.Types.ObjectId.isValid(String(userId).trim())) {
+    return 0;
+  }
+
+  const u = await User.findById(userId, "friends");
+  return u ? u.friends.length : 0;
 };

@@ -19,23 +19,8 @@ if (!fs.existsSync(videosDir)) {
   fs.mkdirSync(videosDir, { recursive: true });
 }
 
-// Storage configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    if (file.fieldname === "image") {
-      cb(null, imagesDir);
-    } else if (file.fieldname === "video") {
-      cb(null, videosDir);
-    } else {
-      cb(new Error("Invalid field name"), null);
-    }
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-  },
-});
+// Storage configuration - memoryStorage to upload directly to Cloudinary
+const storage = multer.memoryStorage();
 
 // File filter validation
 const fileFilter = (req, file, cb) => {

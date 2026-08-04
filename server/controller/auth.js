@@ -1,34 +1,7 @@
-import fs from "fs/promises";
-import path from "path";
 import mongoose from "mongoose";
 import user from "../models/auth.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { randomUUID } from "crypto";
-import { fileURLToPath } from "url";
-
-const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const usersFile = path.join(currentDirectory, "..", "data", "users.json");
-
-const isMongoConnected = () => mongoose.connection.readyState === 1;
-
-const readLocalUsers = async () => {
-  try {
-    const content = await fs.readFile(usersFile, "utf8");
-    return JSON.parse(content);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
-
-    throw error;
-  }
-};
-
-const writeLocalUsers = async (users) => {
-  await fs.mkdir(path.dirname(usersFile), { recursive: true });
-  await fs.writeFile(usersFile, JSON.stringify(users, null, 2));
-};
 
 const withoutPassword = (currentUser) => {
   const userData =
@@ -51,68 +24,38 @@ export const Signup = async (req, res) => {
   const { name, email, phone, password } = req.body;
   try {
     if (!name || !email || !phone || !password) {
-      return res.status(400).json({ message: "All fields are required" });
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    if (isMongoConnected()) {
-      const existingEmailUser = await user.findOne({ email });
-      if (existingEmailUser) {
-        return res.status(409).json({ message: "User with this email already exists" });
-      }
+    const [existingEmailUser, existingPhoneUser] = await Promise.all([
+      user.findOne({ email: email.toLowerCase().trim() }).lean(),
+      user.findOne({ phone: phone.trim() }).lean(),
+    ]);
 
-      const existingPhoneUser = await user.findOne({ phone });
-      if (existingPhoneUser) {
-        return res.status(409).json({ message: "User with this phone number already exists" });
-      }
-
-      const hashpassword = await bcrypt.hash(password, 12);
-      const newuser = await user.create({
-        name,
-        email,
-        phone,
-        password: hashpassword,
-      });
-
-      return res
-        .status(201)
-        .json({ data: withoutPassword(newuser), token: createToken(newuser) });
-    }
-
-    const users = await readLocalUsers();
-    const existingEmailUser = users.find(
-      (currentUser) => currentUser.email && currentUser.email.toLowerCase() === email.toLowerCase()
-    );
     if (existingEmailUser) {
-      return res.status(409).json({ message: "User with this email already exists" });
+      return res.status(409).json({ success: false, message: "User with this email already exists" });
     }
 
-    const existingPhoneUser = users.find(
-      (currentUser) => currentUser.phone === phone
-    );
     if (existingPhoneUser) {
-      return res.status(409).json({ message: "User with this phone number already exists" });
+      return res.status(409).json({ success: false, message: "User with this phone number already exists" });
     }
 
-    const newuser = {
-      _id: randomUUID(),
-      name,
-      email,
-      phone,
-      password: await bcrypt.hash(password, 12),
-      about: "",
-      tags: [],
-      joinDate: new Date().toISOString(),
-    };
+    const hashpassword = await bcrypt.hash(password, 12);
+    const newuser = await user.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
+      password: hashpassword,
+    });
 
-    users.push(newuser);
-    await writeLocalUsers(users);
-
-    return res
-      .status(201)
-      .json({ data: withoutPassword(newuser), token: createToken(newuser) });
+    return res.status(201).json({
+      success: true,
+      data: withoutPassword(newuser),
+      token: createToken(newuser),
+    });
   } catch (error) {
-    res.status(500).json({ message: "Something went wrong" });
-    return;
+    console.error("[auth:controller] Signup error:", error);
+    return res.status(500).json({ success: false, message: "Something went wrong" });
   }
 };
 
@@ -120,36 +63,12 @@ export const Login = async (req, res) => {
   const { email, password } = req.body;
   try {
     if (!email || !password) {
-      return res.status(400).json({ message: "All fields are required" });
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    if (isMongoConnected()) {
-      const exisitinguser = await user.findOne({ email });
-      if (!exisitinguser) {
-        return res.status(404).json({ message: "User does not exist" });
-      }
-
-      const ispasswordcrct = await bcrypt.compare(
-        password,
-        exisitinguser.password
-      );
-      if (!ispasswordcrct) {
-        return res.status(400).json({ message: "Invalid password" });
-      }
-
-      return res.status(200).json({
-        data: withoutPassword(exisitinguser),
-        token: createToken(exisitinguser),
-      });
-    }
-
-    const users = await readLocalUsers();
-    const exisitinguser = users.find(
-      (currentUser) => currentUser.email.toLowerCase() === email.toLowerCase()
-    );
-
+    const exisitinguser = await user.findOne({ email: email.toLowerCase().trim() }).lean();
     if (!exisitinguser) {
-      return res.status(404).json({ message: "User does not exist" });
+      return res.status(404).json({ success: false, message: "User does not exist" });
     }
 
     const ispasswordcrct = await bcrypt.compare(
@@ -157,31 +76,27 @@ export const Login = async (req, res) => {
       exisitinguser.password
     );
     if (!ispasswordcrct) {
-      return res.status(400).json({ message: "Invalid password" });
+      return res.status(400).json({ success: false, message: "Invalid password" });
     }
 
     return res.status(200).json({
+      success: true,
       data: withoutPassword(exisitinguser),
       token: createToken(exisitinguser),
     });
   } catch (error) {
-    res.status(500).json({ message: "Something went wrong" });
-    return;
+    console.error("[auth:controller] Login error:", error);
+    return res.status(500).json({ success: false, message: "Something went wrong" });
   }
 };
 
 export const getallusers = async (req, res) => {
   try {
-    if (isMongoConnected()) {
-      const alluser = await user.find();
-      return res.status(200).json({ data: alluser.map(withoutPassword) });
-    }
-
-    const alluser = await readLocalUsers();
-    return res.status(200).json({ data: alluser.map(withoutPassword) });
+    const alluser = await user.find().lean();
+    return res.status(200).json({ success: true, data: alluser.map(withoutPassword) });
   } catch (error) {
-    res.status(500).json({ message: "Something went wrong" });
-    return;
+    console.error("[auth:controller] getallusers error:", error);
+    return res.status(500).json({ success: false, message: "Something went wrong" });
   }
 };
 
@@ -189,47 +104,23 @@ export const updateprofile = async (req, res) => {
   const { id: _id } = req.params;
   const { name, about, tags } = req.body.editForm;
 
-  if (isMongoConnected()) {
-    if (!mongoose.Types.ObjectId.isValid(_id)) {
-      return res.status(400).json({ message: "User unavailable" });
-    }
+  if (!mongoose.Types.ObjectId.isValid(_id)) {
+    return res.status(400).json({ success: false, message: "User unavailable" });
+  }
 
-    try {
-      const updateprofile = await user.findByIdAndUpdate(
-        _id,
-        { $set: { name: name, about: about, tags: tags } },
-        { new: true }
-      );
-      res.status(200).json({ data: withoutPassword(updateprofile) });
-    } catch (error) {
-      console.log(error);
-      res.status(500).json({ message: "Something went wrong" });
-      return;
-    }
-
-    return;
+  if (String(req.userid) !== String(_id)) {
+    return res.status(403).json({ success: false, message: "You are not authorized to update this profile" });
   }
 
   try {
-    const users = await readLocalUsers();
-    const userIndex = users.findIndex((currentUser) => currentUser._id === _id);
-
-    if (userIndex === -1) {
-      return res.status(400).json({ message: "User unavailable" });
-    }
-
-    users[userIndex] = {
-      ...users[userIndex],
-      name,
-      about,
-      tags,
-    };
-
-    await writeLocalUsers(users);
-    res.status(200).json({ data: withoutPassword(users[userIndex]) });
+    const updateprofile = await user.findByIdAndUpdate(
+      _id,
+      { $set: { name: name, about: about, tags: tags } },
+      { new: true }
+    );
+    return res.status(200).json({ success: true, data: withoutPassword(updateprofile) });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Something went wrong" });
-    return;
+    console.error("[auth:controller] Update profile error:", error);
+    return res.status(500).json({ success: false, message: "Something went wrong" });
   }
 };

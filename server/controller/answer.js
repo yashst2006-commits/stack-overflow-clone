@@ -1,30 +1,6 @@
-import fs from "fs/promises";
-import path from "path";
-import { randomUUID } from "crypto";
 import mongoose from "mongoose";
-import question from "../models/question.js";
-
-const questionsFile = path.join(process.cwd(), "data", "questions.json");
-
-const isMongoConnected = () => mongoose.connection.readyState === 1;
-
-const readLocalQuestions = async () => {
-  try {
-    const content = await fs.readFile(questionsFile, "utf8");
-    return JSON.parse(content);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
-
-    throw error;
-  }
-};
-
-const writeLocalQuestions = async (questions) => {
-  await fs.mkdir(path.dirname(questionsFile), { recursive: true });
-  await fs.writeFile(questionsFile, JSON.stringify(questions, null, 2));
-};
+import Question from "../models/question.js";
+import { mapQuestionToFrontend } from "../controller/question.js";
 
 const getAnswerMessage = (answerbody) => {
   if (!answerbody || !answerbody.trim()) {
@@ -60,77 +36,32 @@ export const Askanswer = async (req, res) => {
   }
 
   try {
-    const answer = {
-      answerbody: answerText.trim(),
-      useranswered: useranswered || "Unknown user",
-      userid: authorId,
+    const newAnswer = {
+      userId: authorId,
+      username: useranswered || "Unknown user",
+      answer: answerText.trim(),
+      votes: 0,
     };
 
-    if (isMongoConnected()) {
-      if (!mongoose.Types.ObjectId.isValid(_id)) {
-        return res.status(400).json({
-          success: false,
-          message: "Question not found",
-        });
-      }
-
-      const updatequestion = await question.findByIdAndUpdate(
-        _id,
-        {
-          $push: { answer },
-          $inc: { noofanswer: 1 },
-        },
-        { new: true }
-      );
-
-      if (!updatequestion) {
-        return res.status(404).json({
-          success: false,
-          message: "Question not found",
-        });
-      }
-
-      return res.status(201).json({
-        success: true,
-        message: "Answer posted successfully",
-        data: updatequestion,
-      });
-    }
-
-    const localQuestions = await readLocalQuestions();
-    const questionIndex = localQuestions.findIndex(
-      (currentQuestion) => currentQuestion._id === _id
+    const updatequestion = await Question.findByIdAndUpdate(
+      _id,
+      {
+        $push: { answers: newAnswer },
+      },
+      { new: true }
     );
 
-    if (questionIndex === -1) {
+    if (!updatequestion) {
       return res.status(404).json({
         success: false,
         message: "Question not found",
       });
     }
 
-    const now = new Date().toISOString();
-    const localAnswer = {
-      _id: randomUUID(),
-      ...answer,
-      answeredon: now,
-    };
-
-    const currentQuestion = localQuestions[questionIndex];
-    const answers = [...(currentQuestion.answer || []), localAnswer];
-    localQuestions[questionIndex] = {
-      ...currentQuestion,
-      answer: answers,
-      noofanswer: answers.length,
-      updatedAt: now,
-    };
-
-    await writeLocalQuestions(localQuestions);
-
     return res.status(201).json({
       success: true,
       message: "Answer posted successfully",
-      data: localQuestions[questionIndex],
+      data: mapQuestionToFrontend(updatequestion),
     });
   } catch (error) {
     console.error("Database save failed:", error);
@@ -140,6 +71,7 @@ export const Askanswer = async (req, res) => {
     });
   }
 };
+
 export const deleteanswer = async (req, res) => {
   const { id: _id } = req.params;
   const { answerid } = req.body;
@@ -149,57 +81,25 @@ export const deleteanswer = async (req, res) => {
   }
 
   try {
-    if (isMongoConnected()) {
-      if (!mongoose.Types.ObjectId.isValid(_id)) {
-        return res.status(400).json({ success: false, message: "Question unavailable" });
-      }
-      if (!mongoose.Types.ObjectId.isValid(answerid)) {
-        return res.status(400).json({ success: false, message: "Answer unavailable" });
-      }
-
-      const updatequestion = await question.findByIdAndUpdate(
-        _id,
-        {
-          $pull: { answer: { _id: answerid } },
-          $inc: { noofanswer: -1 },
-        },
-        { new: true }
-      );
-
-      if (!updatequestion) {
-        return res.status(404).json({ success: false, message: "Question unavailable" });
-      }
-
-      updatequestion.noofanswer = Math.max(updatequestion.answer.length, 0);
-      await updatequestion.save();
-
-      return res.status(200).json({ success: true, data: updatequestion });
-    }
-
-    const localQuestions = await readLocalQuestions();
-    const questionIndex = localQuestions.findIndex(
-      (currentQuestion) => currentQuestion._id === _id
-    );
-
-    if (questionIndex === -1) {
+    const question = await Question.findById(_id);
+    if (!question) {
       return res.status(404).json({ success: false, message: "Question unavailable" });
     }
 
-    const currentQuestion = localQuestions[questionIndex];
-    const answers = (currentQuestion.answer || []).filter(
-      (answer) => answer._id !== answerid
-    );
+    const answerObj = question.answers.find((ans) => String(ans._id) === String(answerid));
+    if (!answerObj) {
+      return res.status(404).json({ success: false, message: "Answer not found" });
+    }
 
-    localQuestions[questionIndex] = {
-      ...currentQuestion,
-      answer: answers,
-      noofanswer: answers.length,
-      updatedAt: new Date().toISOString(),
-    };
+    // Verify authorization: check if user is the author of the answer
+    if (String(answerObj.userId) !== String(req.userid)) {
+      return res.status(403).json({ success: false, message: "You are not authorized to delete this answer" });
+    }
 
-    await writeLocalQuestions(localQuestions);
+    question.answers.pull(answerid);
+    const updatedQuestion = await question.save();
 
-    return res.status(200).json({ success: true, data: localQuestions[questionIndex] });
+    return res.status(200).json({ success: true, data: mapQuestionToFrontend(updatedQuestion) });
   } catch (error) {
     console.error("Unable to delete answer:", error);
     return res.status(500).json({ success: false, message: "Unable to delete answer" });

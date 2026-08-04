@@ -1,52 +1,15 @@
 import mongoose from "mongoose";
-import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
 import bcrypt from "bcryptjs";
 import user from "./auth.js";
 
-const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const usersFile = path.join(currentDirectory, "..", "data", "users.json");
-
-const isMongoConnected = () => mongoose.connection.readyState === 1;
-
-const readLocalUsers = async () => {
-  try {
-    const content = await fs.readFile(usersFile, "utf8");
-    return JSON.parse(content);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
-};
-
-const writeLocalUsers = async (users) => {
-  await fs.mkdir(path.dirname(usersFile), { recursive: true });
-  await fs.writeFile(usersFile, JSON.stringify(users, null, 2));
-};
-
-// ── Lookup helpers (Phase 1) ──────────────────────────────────────────────────
+// ── Lookup helpers ───────────────────────────────────────────────────────────
 
 export const findUserByEmail = async (email) => {
-  if (isMongoConnected()) {
-    return await user.findOne({ email: { $regex: new RegExp(`^${email}$`, "i") } });
-  } else {
-    const users = await readLocalUsers();
-    return users.find(
-      (u) => u.email && u.email.toLowerCase() === email.toLowerCase()
-    );
-  }
+  return await user.findOne({ email: { $regex: new RegExp(`^${email}$`, "i") } });
 };
 
 export const findUserByPhone = async (phone) => {
-  if (isMongoConnected()) {
-    return await user.findOne({ phone: phone });
-  } else {
-    const users = await readLocalUsers();
-    return users.find((u) => u.phone === phone);
-  }
+  return await user.findOne({ phone: phone });
 };
 
 export const findUserByIdentifier = async (identifier) => {
@@ -58,19 +21,14 @@ export const findUserByIdentifier = async (identifier) => {
   }
 };
 
-// ── Phase 2 model functions ───────────────────────────────────────────────────
+// ── Model functions ──────────────────────────────────────────────────────────
 
 /**
- * Find a user by their _id (works in both Mongo and local-JSON mode).
+ * Find a user by their _id.
  */
 export const findUserById = async (userId) => {
-  if (isMongoConnected()) {
-    if (!mongoose.Types.ObjectId.isValid(userId)) return null;
-    return await user.findById(userId);
-  } else {
-    const users = await readLocalUsers();
-    return users.find((u) => u._id === userId) || null;
-  }
+  if (!mongoose.Types.ObjectId.isValid(userId)) return null;
+  return await user.findById(userId);
 };
 
 /**
@@ -100,15 +58,7 @@ export const validatePasswordDifference = (newPassword, oldPassword) => {
  * Persist a new bcrypt-hashed password for the given userId.
  */
 export const updatePassword = async (userId, hashedPassword) => {
-  if (isMongoConnected()) {
-    await user.findByIdAndUpdate(userId, { $set: { password: hashedPassword } });
-  } else {
-    const users = await readLocalUsers();
-    const idx = users.findIndex((u) => u._id === userId);
-    if (idx === -1) throw new Error("User not found during password update");
-    users[idx] = { ...users[idx], password: hashedPassword };
-    await writeLocalUsers(users);
-  }
+  await user.findByIdAndUpdate(userId, { $set: { password: hashedPassword } });
 };
 
 /**
@@ -132,7 +82,7 @@ export const generatePassword = () => {
     .join("");
 };
 
-// ── Phase 3: Daily reset restriction helper methods ───────────────────────────
+// ── Daily reset restriction helper methods ───────────────────────────────────
 
 export const getLocalDateString = () => {
   const d = new Date();
@@ -152,13 +102,5 @@ export const hasResetPasswordToday = (foundUser) => {
 };
 
 export const updateLastForgotPasswordReset = async (userId, dateStr) => {
-  if (isMongoConnected()) {
-    await user.findByIdAndUpdate(userId, { $set: { lastForgotPasswordReset: dateStr } });
-  } else {
-    const users = await readLocalUsers();
-    const idx = users.findIndex((u) => u._id === userId);
-    if (idx === -1) throw new Error("User not found during date update");
-    users[idx] = { ...users[idx], lastForgotPasswordReset: dateStr };
-    await writeLocalUsers(users);
-  }
+  await user.findByIdAndUpdate(userId, { $set: { lastForgotPasswordReset: dateStr } });
 };

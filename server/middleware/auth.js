@@ -34,11 +34,6 @@ const auth = (req, res, next) => {
     }
 
     req.userid = String(decodedata.id);
-    console.info("[auth] Authenticated request", {
-      method: req.method,
-      path: req.originalUrl,
-      currentUser: req.userid,
-    });
     next();
   } catch (error) {
     console.error("[auth] Authentication failed", {
