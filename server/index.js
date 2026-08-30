@@ -8,6 +8,8 @@ import answerroutes from "./routes/answer.js";
 import friendroutes from "./routes/friend.js";
 import postroutes from "./routes/post.js";
 import forgotPasswordroute from "./routes/forgotPassword.js";
+import subscriptionRoutes from "./routes/subscription.js";
+import paymentRoutes from "./routes/payment.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -17,7 +19,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ── Validate required environment variables ──────────────────────────────────
-const REQUIRED_ENV = ["MONGODB_URL", "JWT_SECRET", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"];
+const REQUIRED_ENV = [
+  "MONGODB_URL",
+  "JWT_SECRET",
+  "CLOUDINARY_CLOUD_NAME",
+  "CLOUDINARY_API_KEY",
+  "CLOUDINARY_API_SECRET",
+  "RAZORPAY_KEY_ID",
+  "RAZORPAY_KEY_SECRET"
+];
 for (const key of REQUIRED_ENV) {
   if (!process.env[key]) {
     console.error(`[startup] Missing required environment variable: ${key}`);
@@ -45,6 +55,8 @@ app.use("/answer", answerroutes);
 app.use("/friends", friendroutes);
 app.use("/posts", postroutes);
 app.use("/forgot-password", forgotPasswordroute);
+app.use("/subscription", subscriptionRoutes);
+app.use("/api/payment", paymentRoutes);
 
 mongoose
   .connect(process.env.MONGODB_URL)

@@ -10,5 +10,11 @@ const userschema = mongoose.Schema({
   joinDate: { type: Date, default: Date.now },
   lastForgotPasswordReset: { type: String, default: null },
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "user" }],
+  subscription: {
+    plan: { type: String, default: "Free" },
+    active: { type: Boolean, default: true },
+    startDate: { type: Date, default: Date.now },
+    endDate: { type: Date, default: null },
+  },
 });
 export default mongoose.model("user", userschema);

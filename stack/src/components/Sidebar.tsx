@@ -12,6 +12,7 @@ import {
   Trophy,
   Users,
   Globe,
+  CreditCard,
 } from "lucide-react";
 import Link from "next/link";
 import React from "react";
@@ -92,6 +93,15 @@ const Sidebar = ({ isopen }: any) => {
               >
                 <Globe className="w-4 h-4 mr-2 lg:mr-3 text-orange-500" />
                 Social Feed
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/subscription"
+                className="flex items-center px-2 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm font-semibold text-orange-600 bg-orange-50/50 hover:bg-orange-50"
+              >
+                <CreditCard className="w-4 h-4 mr-2 lg:mr-3 text-orange-500" />
+                Subscriptions
               </Link>
             </li>
             <li>
