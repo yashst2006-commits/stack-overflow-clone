@@ -4,10 +4,12 @@ import {
   deletequestion,
   getallquestion,
   votequestion,
+  checkLimit,
 } from "../controller/question.js";
 
 const router = express.Router();
 import auth from "../middleware/auth.js";
+router.get("/check-limit", auth, checkLimit);
 router.post("/", auth, Askquestion);
 router.get("/", getallquestion);
 router.post("/ask", auth, Askquestion);

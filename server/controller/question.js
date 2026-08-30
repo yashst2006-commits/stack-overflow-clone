@@ -1,5 +1,12 @@
 import mongoose from "mongoose";
 import Question from "../models/question.js";
+import user from "../models/auth.js";
+import {
+  getCurrentTime,
+  getISTStartOfToday,
+  getActivePlan,
+  getDailyQuestionLimit,
+} from "../utils/timeHelper.js";
 
 // Helper to map MongoDB schema to the exact format expected by frontend
 export const mapQuestionToFrontend = (q) => {
@@ -87,6 +94,38 @@ export const Askquestion = async (req, res) => {
       });
     }
 
+    const currentUser = await user.findById(payload.userId);
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const currentTime = getCurrentTime();
+    const activePlan = getActivePlan(currentUser, currentTime);
+    const limit = getDailyQuestionLimit(activePlan);
+
+    let remainingQuestions = "unlimited";
+
+    if (activePlan !== "Gold") {
+      const startOfToday = getISTStartOfToday(currentTime);
+      const count = await Question.countDocuments({
+        author: { $in: [payload.userId, new mongoose.Types.ObjectId(payload.userId)] },
+        createdAt: { $gte: startOfToday },
+      });
+
+      if (count >= limit) {
+        const limitStr = limit === 1 ? "1 question" : `${limit} questions`;
+        return res.status(429).json({
+          success: false,
+          message: `You have reached your ${activePlan} plan limit of ${limitStr} for today.`,
+        });
+      }
+
+      remainingQuestions = Math.max(0, limit - (count + 1));
+    }
+
     const questionData = {
       title: payload.title.trim(),
       body: payload.description.trim(),
@@ -109,16 +148,83 @@ export const Askquestion = async (req, res) => {
 
     const postques = await Question.create(questionData);
 
-    return res.status(201).json({
+    const responsePayload = {
       success: true,
       message: "Question posted successfully",
       data: mapQuestionToFrontend(postques),
-    });
+    };
+
+    if (activePlan !== "Gold") {
+      responsePayload.remainingQuestions = remainingQuestions;
+    } else {
+      responsePayload.remainingQuestions = "unlimited";
+    }
+
+    return res.status(201).json(responsePayload);
   } catch (error) {
     console.error("Unable to save question:", error);
     return res.status(500).json({
       success: false,
       message: "Unable to save question",
+    });
+  }
+};
+
+export const checkLimit = async (req, res) => {
+  try {
+    const userId = req.userid;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "You must be logged in",
+      });
+    }
+
+    const currentUser = await user.findById(userId).lean();
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const currentTime = getCurrentTime();
+    const activePlan = getActivePlan(currentUser, currentTime);
+    const limit = getDailyQuestionLimit(activePlan);
+
+    if (activePlan === "Gold") {
+      return res.status(200).json({
+        success: true,
+        plan: activePlan,
+        limit: "unlimited",
+        postedToday: 0,
+        remainingQuestions: "unlimited",
+        limitReached: false,
+      });
+    }
+
+    const startOfToday = getISTStartOfToday(currentTime);
+    const postedToday = await Question.countDocuments({
+      author: { $in: [userId, new mongoose.Types.ObjectId(userId)] },
+      createdAt: { $gte: startOfToday },
+    });
+
+    const remainingQuestions = Math.max(0, limit - postedToday);
+    const limitReached = postedToday >= limit;
+
+    return res.status(200).json({
+      success: true,
+      plan: activePlan,
+      limit,
+      postedToday,
+      remainingQuestions,
+      limitReached,
+    });
+  } catch (error) {
+    console.error("Error checking question limit:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error while checking posting limits",
     });
   }
 };

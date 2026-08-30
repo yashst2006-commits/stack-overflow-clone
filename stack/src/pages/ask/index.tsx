@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/AuthContext";
 import axiosInstance from "@/lib/axiosinstance";
 import { Plus, X } from "lucide-react";
 import { useRouter } from "next/router";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { toast } from "react-toastify";
 
 const index = () => {
@@ -27,6 +27,28 @@ const index = () => {
     tags: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [limitStatus, setLimitStatus] = useState<any>(null);
+  const [checkingLimit, setCheckingLimit] = useState(true);
+
+  useEffect(() => {
+    if (!user) {
+      setCheckingLimit(false);
+      return;
+    }
+    const checkUserLimit = async () => {
+      try {
+        const res = await axiosInstance.get("/questions/check-limit");
+        if (res.data.success) {
+          setLimitStatus(res.data);
+        }
+      } catch (err) {
+        console.error("Failed to check question limit:", err);
+      } finally {
+        setCheckingLimit(false);
+      }
+    };
+    checkUserLimit();
+  }, [user]);
 
   const validateForm = () => {
     const errors = {
@@ -135,6 +157,48 @@ const index = () => {
           Ask a public question
         </h1>
 
+        {checkingLimit ? (
+          <div className="p-4 mb-6 rounded-lg bg-gray-50 border border-gray-200 animate-pulse text-gray-500">
+            Checking your posting limits...
+          </div>
+        ) : limitStatus ? (
+          <div className={`p-4 mb-6 rounded-lg border ${
+            limitStatus.limitReached 
+              ? "bg-red-50 border-red-200 text-red-800" 
+              : "bg-blue-50 border-blue-200 text-blue-800"
+          }`}>
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+              <div>
+                <p className="font-semibold text-base">
+                  {limitStatus.limitReached 
+                    ? `Daily Question Limit Reached (${limitStatus.plan} Plan)` 
+                    : `Active Subscription: ${limitStatus.plan} Plan`
+                  }
+                </p>
+                <p className="text-sm mt-1">
+                  {limitStatus.limitReached 
+                    ? `You have reached your daily question posting limit of ${limitStatus.limit === 1 ? '1 question' : `${limitStatus.limit} questions`} for today. Please upgrade your plan or try again tomorrow.`
+                    : limitStatus.plan === "Gold" 
+                      ? "You have unlimited questions today. Ask away!"
+                      : `You have posted ${limitStatus.postedToday} ${limitStatus.postedToday === 1 ? 'question' : 'questions'} today. You can ask ${limitStatus.remainingQuestions} more ${limitStatus.remainingQuestions === 1 ? 'question' : 'questions'} today.`
+                  }
+                </p>
+              </div>
+              {limitStatus.limitReached && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => router.push("/subscription")}
+                  className="w-full sm:w-auto border-red-300 hover:bg-red-100 text-red-800 shrink-0 bg-white"
+                >
+                  Upgrade Plan
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <form onSubmit={handleSubmit}>
           <Card>
             <CardHeader>
@@ -241,7 +305,7 @@ const index = () => {
               <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
                 <Button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || checkingLimit || limitStatus?.limitReached}
                   className="bg-blue-600 text-white"
                 >
                   {isSubmitting ? "Submitting..." : "Review your question"}
