@@ -166,7 +166,20 @@ export default function SubscriptionPage() {
             });
 
             if (verificationResult.success) {
-              toast.success("Subscription activated successfully.");
+              // Show message based on whether invoice email was sent (Phase 5)
+              if (verificationResult.emailSent === true) {
+                toast.success(
+                  verificationResult.message ||
+                    "Subscription activated. Invoice sent to your registered email."
+                );
+              } else if (verificationResult.emailSent === false) {
+                toast.warn(
+                  verificationResult.message ||
+                    "Subscription activated, but we could not send the invoice email."
+                );
+              } else {
+                toast.success("Subscription activated successfully.");
+              }
               // Refresh subscription details automatically
               await fetchData();
             } else {

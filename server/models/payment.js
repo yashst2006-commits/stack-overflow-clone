@@ -50,6 +50,20 @@ const paymentSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    // Phase 5 — invoice tracking
+    invoiceNumber: {
+      type: String,
+      default: null,
+      sparse: true,
+    },
+    invoiceEmailSent: {
+      type: Boolean,
+      default: false,
+    },
+    invoiceEmailSentAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

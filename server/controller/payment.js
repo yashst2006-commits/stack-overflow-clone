@@ -3,6 +3,8 @@ import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.
 import userModel from "../models/auth.js";
 import PaymentModel from "../models/payment.js";
 import { isPaymentWindowOpen } from "../utils/timeHelper.js";
+import { sendSubscriptionInvoiceEmail } from "../services/emailService.js";
+import { generateInvoiceNumber } from "../utils/invoiceHelper.js";
 
 // Define plan amounts in INR (Bronze = 100, Silver = 300, Gold = 1000)
 const PLAN_AMOUNTS = {
@@ -202,9 +204,50 @@ export const verifyPayment = async (req, res) => {
     });
     await newPayment.save();
 
+    // 8. Phase 5 — Generate invoice number and send email
+    //    Email failure must NEVER fail the payment. Wrap entirely in try/catch.
+    let emailSent = false;
+    let invoiceNumber = null;
+
+    try {
+      invoiceNumber = await generateInvoiceNumber();
+
+      await sendSubscriptionInvoiceEmail({
+        invoiceNumber,
+        userName: user.name,
+        userEmail: user.email, // always from DB — never from frontend
+        plan: selectedPlan,
+        amount: amountInInr,
+        paymentId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        paymentDate: currentDateTime,
+        subscriptionStart: currentDateTime,
+        subscriptionEnd: expiryDateTime,
+      });
+
+      // Mark invoice sent on the payment record
+      await PaymentModel.findByIdAndUpdate(newPayment._id, {
+        invoiceNumber,
+        invoiceEmailSent: true,
+        invoiceEmailSentAt: new Date(),
+      });
+
+      emailSent = true;
+      console.info("[payment:controller] Invoice email sent:", invoiceNumber, "→", user.email);
+    } catch (emailError) {
+      // Log full error server-side; never expose SMTP details to the client
+      console.error("[payment:controller] Invoice email failed (payment still successful):", emailError.message);
+    }
+
+    const message = emailSent
+      ? `Subscription activated successfully. Your invoice has been sent to ${user.email}.`
+      : "Subscription activated successfully, but we could not send the invoice email.";
+
     return res.status(200).json({
       success: true,
-      message: "Subscription activated successfully.",
+      message,
+      emailSent,
+      invoiceNumber: invoiceNumber || undefined,
       subscription: user.subscription,
     });
   } catch (error) {
