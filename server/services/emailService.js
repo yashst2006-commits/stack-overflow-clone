@@ -1,27 +1,66 @@
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
+import { Resend } from "resend";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transport selection
+//
+// Render free-tier blocks outbound SMTP ports 25, 465 and 587 at the network
+// level.  Any connection attempt to smtp.gmail.com:587 from a Render dyno will
+// simply time out — no error code, just a silent hang until the socket timer
+// fires.
+//
+// Resolution: when RESEND_API_KEY is present in the environment we use the
+// Resend HTTP SDK which communicates over HTTPS (port 443) — never blocked.
+// When RESEND_API_KEY is absent (e.g. local dev) we fall back to the existing
+// Nodemailer/SMTP transporter so local development behaviour is unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Creates and returns a cached Nodemailer transporter.
- * Reads credentials exclusively from environment variables.
+ * Returns true if the Resend HTTP transport should be used.
+ * Logs a clear, credential-free diagnostic on startup.
  */
-let _transporter = null;
+const useResend = () => {
+  const hasKey = !!process.env.RESEND_API_KEY;
+  return hasKey;
+};
 
-const getTransporter = () => {
-  if (_transporter) return _transporter;
+// Cached Nodemailer SMTP transporter (local-dev / fallback only)
+let _smtpTransporter = null;
 
-  _transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: parseInt(process.env.EMAIL_PORT || "587", 10),
-    secure: process.env.EMAIL_PORT === "465", // true only for port 465
+const getSmtpTransporter = () => {
+  if (_smtpTransporter) return _smtpTransporter;
+
+  const host = process.env.EMAIL_HOST || "smtp.gmail.com";
+  const port = parseInt(process.env.EMAIL_PORT || "587", 10);
+
+  console.info(
+    "[emailService] SMTP fallback transport — host=%s port=%d secure=%s",
+    host,
+    port,
+    port === 465
+  );
+
+  _smtpTransporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465, // true only for port 465
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASSWORD,
     },
+    // Explicit timeouts so failures surface quickly instead of hanging
+    connectionTimeout: 10_000,  // 10 s to establish TCP connection
+    greetingTimeout:   8_000,   // 8 s for SMTP greeting
+    socketTimeout:     15_000,  // 15 s of socket inactivity
   });
 
-  return _transporter;
+  return _smtpTransporter;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF invoice generator — unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Generates a professional PDF invoice in memory and returns it as a Buffer.
@@ -185,6 +224,10 @@ const generateInvoicePDF = (data) => {
   });
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Email body builders — unchanged
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Builds the HTML body for the invoice email.
  */
@@ -315,31 +358,95 @@ Regards,
 CodeQuest Team`;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Resend HTTP transport (production — works on Render free tier)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Sends a subscription invoice email with a PDF attachment.
+ * Sends the invoice email via the Resend HTTP API.
+ * Uses HTTPS (port 443) — never blocked by Render's firewall.
  *
  * @param {object} invoiceData
- * @param {string} invoiceData.invoiceNumber
- * @param {string} invoiceData.userName
- * @param {string} invoiceData.userEmail   — always from the DB, never from the frontend
- * @param {string} invoiceData.plan
- * @param {number} invoiceData.amount
- * @param {string} invoiceData.paymentId
- * @param {string} invoiceData.orderId
- * @param {Date}   invoiceData.paymentDate
- * @param {Date}   invoiceData.subscriptionStart
- * @param {Date}   invoiceData.subscriptionEnd
- * @returns {Promise<{ sent: boolean }>}
- * @throws on transport/SMTP error
+ * @param {Buffer} pdfBuffer
  */
-export const sendSubscriptionInvoiceEmail = async (invoiceData) => {
-  const transporter = getTransporter();
+const sendViaResend = async (invoiceData, pdfBuffer) => {
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
-  // Generate PDF in memory
-  const pdfBuffer = await generateInvoicePDF(invoiceData);
+  // RESEND_FROM must be a verified sender address/domain in your Resend dashboard.
+  // Falls back to EMAIL_FROM for convenience, but must still be verified with Resend.
+  const from =
+    process.env.RESEND_FROM ||
+    process.env.EMAIL_FROM ||
+    "noreply@codequest.dev";
+
+  console.info(
+    "[emailService] Sending invoice via Resend HTTP API — from=%s to=%s invoice=%s",
+    from,
+    invoiceData.userEmail,
+    invoiceData.invoiceNumber
+  );
+
+  const { data, error } = await resend.emails.send({
+    from,
+    to: [invoiceData.userEmail],
+    subject: `CodeQuest Subscription Activated - ${invoiceData.plan} Plan`,
+    text: buildTextBody(invoiceData),
+    html: buildHtmlBody(invoiceData),
+    attachments: [
+      {
+        filename: `CodeQuest-Invoice-${invoiceData.invoiceNumber}.pdf`,
+        content: pdfBuffer,
+      },
+    ],
+  });
+
+  if (error) {
+    // Log the error type/message — never log credentials
+    console.error(
+      "[emailService] Resend API returned an error — name=%s message=%s statusCode=%s",
+      error.name,
+      error.message,
+      error.statusCode ?? "n/a"
+    );
+    throw new Error(`Resend API error: ${error.name} — ${error.message}`);
+  }
+
+  console.info(
+    "[emailService] Resend accepted the email — id=%s",
+    data?.id ?? "unknown"
+  );
+
+  return { sent: true, messageId: data?.id };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SMTP transport (local development / fallback)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sends the invoice email via Nodemailer SMTP.
+ * Only used when RESEND_API_KEY is NOT set (local development).
+ *
+ * @param {object} invoiceData
+ * @param {Buffer} pdfBuffer
+ */
+const sendViaSmtp = async (invoiceData, pdfBuffer) => {
+  const transporter = getSmtpTransporter();
+
+  const from =
+    process.env.EMAIL_FROM ||
+    `"CodeQuest" <${process.env.EMAIL_USER}>`;
+
+  console.info(
+    "[emailService] Sending invoice via SMTP — host=%s from=%s to=%s invoice=%s",
+    process.env.EMAIL_HOST,
+    from,
+    invoiceData.userEmail,
+    invoiceData.invoiceNumber
+  );
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM || `"CodeQuest" <${process.env.EMAIL_USER}>`,
+    from,
     to: invoiceData.userEmail, // always from authenticated user DB record
     subject: `CodeQuest Subscription Activated - ${invoiceData.plan} Plan`,
     text: buildTextBody(invoiceData),
@@ -353,6 +460,59 @@ export const sendSubscriptionInvoiceEmail = async (invoiceData) => {
     ],
   };
 
-  await transporter.sendMail(mailOptions);
-  return { sent: true };
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.info(
+      "[emailService] SMTP accepted the email — messageId=%s",
+      info.messageId
+    );
+    return { sent: true, messageId: info.messageId };
+  } catch (smtpErr) {
+    // Log structured diagnostics without exposing credentials
+    console.error(
+      "[emailService] SMTP send failed — code=%s command=%s message=%s",
+      smtpErr.code ?? "n/a",
+      smtpErr.command ?? "n/a",
+      smtpErr.message
+    );
+    // Reset cached transporter so a new attempt uses a fresh connection
+    _smtpTransporter = null;
+    throw smtpErr;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API — called by the payment controller
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sends a subscription invoice email with a PDF attachment.
+ *
+ * Transport selection:
+ *  - RESEND_API_KEY set → Resend HTTP API (production / Render)
+ *  - RESEND_API_KEY absent → Nodemailer SMTP (local dev)
+ *
+ * @param {object} invoiceData
+ * @param {string} invoiceData.invoiceNumber
+ * @param {string} invoiceData.userName
+ * @param {string} invoiceData.userEmail   — always from the DB, never from the frontend
+ * @param {string} invoiceData.plan
+ * @param {number} invoiceData.amount
+ * @param {string} invoiceData.paymentId
+ * @param {string} invoiceData.orderId
+ * @param {Date}   invoiceData.paymentDate
+ * @param {Date}   invoiceData.subscriptionStart
+ * @param {Date}   invoiceData.subscriptionEnd
+ * @returns {Promise<{ sent: boolean, messageId?: string }>}
+ * @throws on transport / API error
+ */
+export const sendSubscriptionInvoiceEmail = async (invoiceData) => {
+  // Generate PDF in memory (unchanged)
+  const pdfBuffer = await generateInvoicePDF(invoiceData);
+
+  if (useResend()) {
+    return sendViaResend(invoiceData, pdfBuffer);
+  }
+
+  return sendViaSmtp(invoiceData, pdfBuffer);
 };
