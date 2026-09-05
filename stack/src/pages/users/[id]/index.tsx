@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import Mainlayout from "@/layout/Mainlayout";
 import { useAuth } from "@/lib/AuthContext";
 import axiosInstance from "@/lib/axiosinstance";
-import { Calendar, Edit, Plus, X } from "lucide-react";
+import { Award, Calendar, Edit, Plus, Send, X } from "lucide-react";
 import { useRouter } from "next/router";
 import React, { useEffect, useState } from "react";
 import { toast } from "react-toastify";
@@ -40,7 +40,7 @@ const getUserData = (id: string) => {
   return users[id as keyof typeof users] || users["1"];
 };
 const index = () => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const router = useRouter();
   const { id } = router.query;
   const [users, setusers] = useState<any>(null);
@@ -52,6 +52,12 @@ const index = () => {
     tags: users?.tags || [],
   });
   const [newTag, setNewTag] = useState("");
+  const [isTransferringOpen, setIsTransferringOpen] = useState(false);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [isTransferring, setIsTransferring] = useState(false);
+  // Holds the AUTHENTICATED user's live point balance for the transfer modal.
+  // Initialised from context; refreshed from the server when the modal opens.
+  const [senderPoints, setSenderPoints] = useState<number>(user?.points ?? 0);
 
   useEffect(() => {
     const fetchuser = async () => {
@@ -114,6 +120,82 @@ const index = () => {
       ...editForm,
       tags: editForm.tags.filter((tag: any) => tag !== tagToRemove),
     });
+  };
+
+
+  // Fetch the logged-in user's CURRENT points from the server.
+  // Avoids using a stale localStorage snapshot or the viewed profile's points.
+  const fetchSenderPoints = async () => {
+    if (!user?._id) return;
+    try {
+      const res = await axiosInstance.get("/user/getalluser");
+      const me = res.data.data.find((u: any) => u._id === user._id);
+      if (me && typeof me.points === "number") {
+        setSenderPoints(me.points);
+      }
+    } catch (err) {
+      // Fallback: keep the context value so UI still shows something
+      setSenderPoints(user?.points ?? 0);
+    }
+  };
+
+  // Called when the Transfer Dialog open state changes.
+  const handleTransferDialogChange = (open: boolean) => {
+    setIsTransferringOpen(open);
+    if (open) {
+      // Always refresh sender points from the server when the modal opens
+      fetchSenderPoints();
+      setTransferAmount("");
+    }
+  };
+
+  const handleTransferPoints = async () => {
+    const amt = parseInt(transferAmount, 10);
+    if (isNaN(amt) || amt <= 0) {
+      toast.error("Please enter a valid positive point amount.");
+      return;
+    }
+
+    if (!id) {
+      toast.error("Invalid recipient.");
+      return;
+    }
+
+    setIsTransferring(true);
+    try {
+      const res = await axiosInstance.post("/user/transfer-points", {
+        recipientId: id,
+        amount: amt,
+      });
+
+      if (res.data.success) {
+        toast.success(res.data.message || "Points transferred successfully.");
+
+        // Update the viewed profile's (recipient's) displayed points
+        setusers((prev: any) => ({
+          ...prev,
+          points: (prev?.points || 0) + amt,
+        }));
+
+        // Update the authenticated user's points using the server-authoritative
+        // remainingPoints value — never derive this from the profile being viewed.
+        const newSenderPoints =
+          typeof res.data.remainingPoints === "number"
+            ? res.data.remainingPoints
+            : senderPoints - amt;
+        setSenderPoints(newSenderPoints);
+        refreshUser({ points: newSenderPoints });
+
+        setIsTransferringOpen(false);
+        setTransferAmount("");
+      }
+    } catch (error: any) {
+      console.error(error);
+      const msg = error?.response?.data?.message || "Failed to transfer points.";
+      toast.error(msg);
+    } finally {
+      setIsTransferring(false);
+    }
   };
 
   const currentUserId = user?._id;
@@ -266,12 +348,85 @@ const index = () => {
                   </DialogContent>
                 </Dialog>
               )}
+
+              {!isOwnProfile && user && (
+                <Dialog open={isTransferringOpen} onOpenChange={handleTransferDialogChange}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="flex items-center gap-2 bg-orange-600 text-white hover:bg-orange-700 border-none"
+                    >
+                      <Send className="w-4 h-4" />
+                      Transfer Points
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md bg-white text-gray-900">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                        <Award className="w-5 h-5 text-orange-500" />
+                        Transfer Points
+                      </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-3">
+                      <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-blue-900">
+                        <p className="font-semibold">Recipient: {users?.name}</p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Your Current Points: <strong className="text-gray-900">{senderPoints}</strong>
+                        </p>
+                      </div>
+
+                      {/* Warning notice if current user balance <= 10 */}
+                      {senderPoints <= 10 && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs font-medium">
+                          ⚠️ You need more than 10 points to transfer points.
+                        </div>
+                      )}
+
+                      <div>
+                        <Label htmlFor="transfer-amount">Point Amount</Label>
+                        <Input
+                          id="transfer-amount"
+                          type="number"
+                          min="1"
+                          placeholder="Enter points amount"
+                          value={transferAmount}
+                          onChange={(e) => setTransferAmount(e.target.value)}
+                          disabled={senderPoints <= 10}
+                          className="mt-1"
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-3 pt-3 border-t">
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsTransferringOpen(false)}
+                          className="bg-white text-gray-800"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleTransferPoints}
+                          disabled={senderPoints <= 10 || isTransferring || !transferAmount}
+                          className="bg-orange-600 hover:bg-orange-700 text-white"
+                        >
+                          {isTransferring ? "Transferring..." : "Confirm Transfer"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-4">
               <div className="flex items-center">
                 <Calendar className="w-4 h-4 mr-1" />
                 Member since{" "}
                 {new Date(users.joinDate).toISOString().split("T")[0]}
+              </div>
+              <div className="flex items-center text-gray-800 font-medium">
+                <Award className="w-4 h-4 mr-1 text-orange-500" />
+                Points: <span className="font-bold ml-1">{users.points ?? 0}</span>
               </div>
             </div>
             <div className="flex flex-wrap items-center space-x-6 text-sm">

@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+server/node_modules/
+stack/node_modules/
+
+# Next.js build output
+stack/.next/
+stack/out/
+
+# Environment variable files with sensitive credentials
+.env
+.env.*
+!.env.example
+server/.env
+stack/.env
+stack/.env.local
+
+# IDE & OS files
+.DS_Store
+*.log

@@ -7,6 +7,7 @@ const userschema = mongoose.Schema({
   password: { type: String, required: true },
   about: { type: String, default: "" },
   tags: { type: [String], default: [] },
+  points: { type: Number, default: 0, min: 0 },
   joinDate: { type: Date, default: Date.now },
   lastForgotPasswordReset: { type: String, default: null },
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "user" }],

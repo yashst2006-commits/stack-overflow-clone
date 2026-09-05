@@ -49,6 +49,7 @@ app.get("/", (req, res) => {
 });
 
 app.use("/user", userroutes);
+app.use("/api/points", userroutes);
 app.use("/questions", questionroute);
 app.use("/question", questionroute);
 app.use("/answer", answerroutes);

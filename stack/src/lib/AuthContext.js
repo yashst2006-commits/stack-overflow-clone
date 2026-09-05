@@ -87,10 +87,21 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("user");
     toast.info("Logged out");
   };
+
+  // Merge partial updates into the stored authenticated user (e.g. refreshed points).
+  // Does NOT trigger a full re-login; only updates the fields provided.
+  const refreshUser = (updates) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, ...updates };
+      localStorage.setItem("user", JSON.stringify(updated));
+      return updated;
+    });
+  };
   
   return (
     <AuthContext.Provider
-      value={{ user, Signup, Login, Logout, loading, error }}
+      value={{ user, Signup, Login, Logout, refreshUser, loading, error }}
     >
       {children}
     </AuthContext.Provider>

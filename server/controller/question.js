@@ -32,6 +32,9 @@ export const mapQuestionToFrontend = (q) => {
       useranswered: ans.username,
       userid: String(ans.userId),
       answeredon: ans.createdAt,
+      votes: typeof ans.votes === "number" ? ans.votes : ((ans.upvote?.length || 0) - (ans.downvote?.length || 0)),
+      upvote: ans.upvote || [],
+      downvote: ans.downvote || [],
     })),
   };
 };
